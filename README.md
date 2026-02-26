@@ -124,7 +124,7 @@ npm start       # Run compiled JS
 
 ## How It Works
 
-This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.dev). It runs as a local process that your AI client (Cursor, Claude Desktop, etc.) communicates with over stdio.
+This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.to). It runs as a local process that your AI client (Cursor, Claude Desktop, etc.) communicates with over stdio.
 
 ```
 Your AI Assistant  <-->  agentphone-mcp (local)  <-->  AgentPhone API  <-->  Phone Network
