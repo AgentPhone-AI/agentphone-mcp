@@ -1,0 +1,53 @@
+{
+  "name": "agentphone-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for AgentPhone — give AI agents phone numbers, SMS, and voice calls",
+  "type": "module",
+  "bin": {
+    "agentphone-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agentphone",
+    "telephony",
+    "ai",
+    "voice",
+    "sms",
+    "phone",
+    "cursor",
+    "claude"
+  ],
+  "author": "AgentPhone <hello@agentphone.dev> (https://agentphone.dev)",
+  "license": "MIT",
+  "homepage": "https://github.com/AgentPhone-AI/agentphone-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AgentPhone-AI/agentphone-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AgentPhone-AI/agentphone-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
