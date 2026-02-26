@@ -8,7 +8,7 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 ### 1. Get your API key
 
-Sign up at [agentphone.dev](https://agentphone.to) and create an API key from **Settings**.
+Sign up at [agentphone.to](https://agentphone.to) and create an API key from **Settings**.
 
 ### 2. Add to Cursor
 
