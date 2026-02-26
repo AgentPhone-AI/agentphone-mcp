@@ -10,30 +10,12 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 Sign up at [agentphone.to](https://agentphone.to) and create an API key from **Settings**.
 
-### 2. Add to Cursor
+### 2. Add to Cursor or Claude Desktop
 
-Open **Cursor Settings > MCP Servers > Add new server** and paste:
+Both use the same config. Add this under `mcpServers`:
 
-```json
-{
-  "agentphone": {
-    "command": "npx",
-    "args": ["-y", "agentphone-mcp"],
-    "env": {
-      "AGENTPHONE_API_KEY": "your_api_key_here"
-    }
-  }
-}
-```
-
-### 3. Add to Claude Desktop
-
-Open your config file:
-
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-Add:
+**Cursor:** **Settings > MCP** or `~/.cursor/mcp.json`  
+**Claude Desktop:** `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 
 ```json
 {
@@ -42,12 +24,15 @@ Add:
       "command": "npx",
       "args": ["-y", "agentphone-mcp"],
       "env": {
-        "AGENTPHONE_API_KEY": "your_api_key_here"
+        "AGENTPHONE_API_KEY": "your_api_key_here",
+        "AGENTPHONE_BASE_URL": "https://api.agentphone.to"
       }
     }
   }
 }
 ```
+
+You can also run the built server with `node` and a path to `dist/index.js` (e.g. after cloning and building this repo).
 
 ## What Can It Do?
 
