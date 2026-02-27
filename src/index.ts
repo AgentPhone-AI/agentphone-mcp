@@ -161,7 +161,7 @@ server.tool(
     const formatted = result.data
       .map(
         (c) =>
-          `[${c.startedAt}] ${c.direction} ${c.fromNumber} → ${c.toNumber} (${c.status})`
+          `[${c.startedAt}] ${c.direction} ${c.fromNumber} → ${c.toNumber} (${c.status}) id=${c.id}`
       )
       .join("\n");
 
@@ -169,7 +169,7 @@ server.tool(
       content: [
         {
           type: "text" as const,
-          text: `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}`,
+          text: `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}\n\nUse get_call with the id= value to fetch transcript.`,
         },
       ],
     };
