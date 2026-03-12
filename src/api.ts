@@ -64,7 +64,7 @@ export class AgentPhoneAPI {
     }>("GET", `/v1/numbers?limit=${limit}&offset=${offset}`);
   }
 
-  async buyNumber(country = "US", agentId?: string) {
+  async buyNumber(country = "US", areaCode?: string, agentId?: string) {
     return this.request<{
       id: string;
       phoneNumber: string;
@@ -72,7 +72,7 @@ export class AgentPhoneAPI {
       status: string;
       agentId: string | null;
       createdAt: string;
-    }>("POST", "/v1/numbers", { country, agentId });
+    }>("POST", "/v1/numbers", { country, areaCode, agentId });
   }
 
   async releaseNumber(numberId: string) {
@@ -211,7 +211,8 @@ export class AgentPhoneAPI {
     agentId: string,
     toNumber: string,
     systemPrompt: string,
-    initialGreeting?: string
+    initialGreeting?: string,
+    model?: string
   ) {
     return this.request<{
       id: string;
@@ -226,6 +227,7 @@ export class AgentPhoneAPI {
       toNumber,
       systemPrompt,
       initialGreeting,
+      model,
     });
   }
 

@@ -66,13 +66,18 @@ server.tool(
       .length(2)
       .default("US")
       .describe("2-letter ISO country code (e.g. US, CA, GB)"),
+    area_code: z
+      .string()
+      .length(3)
+      .optional()
+      .describe("3-digit area code to request a specific region (US/CA only, e.g. '212', '415')"),
     agent_id: z
       .string()
       .optional()
       .describe("Agent ID to attach this number to immediately"),
   },
-  async ({ country, agent_id }) => {
-    const result = await api.buyNumber(country, agent_id);
+  async ({ country, area_code, agent_id }) => {
+    const result = await api.buyNumber(country, area_code, agent_id);
     return {
       content: [
         {
@@ -267,14 +272,19 @@ server.tool(
       .string()
       .optional()
       .describe("What the AI says when the call connects. If not set, the AI will generate one from the topic."),
+    model: z
+      .string()
+      .optional()
+      .describe("The LLM model to use for the conversation (e.g. 'claude-sonnet-4-6', 'gpt-4o'). Uses the server default if not specified."),
   },
-  async ({ agent_id, to_number, topic, initial_greeting }) => {
+  async ({ agent_id, to_number, topic, initial_greeting, model }) => {
     const systemPrompt = topic;
     const result = await api.makeConversationCall(
       agent_id,
       to_number,
       systemPrompt,
-      initial_greeting
+      initial_greeting,
+      model
     );
     return {
       content: [
