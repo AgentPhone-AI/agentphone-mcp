@@ -64,7 +64,7 @@ export class AgentPhoneAPI {
     }>("GET", `/v1/numbers?limit=${limit}&offset=${offset}`);
   }
 
-  async buyNumber(country = "US", agentId?: string) {
+  async buyNumber(country = "US", agentId?: string, areaCode?: string) {
     return this.request<{
       id: string;
       phoneNumber: string;
@@ -72,7 +72,7 @@ export class AgentPhoneAPI {
       status: string;
       agentId: string | null;
       createdAt: string;
-    }>("POST", "/v1/numbers", { country, agentId });
+    }>("POST", "/v1/numbers", { country, agentId, areaCode });
   }
 
   async releaseNumber(numberId: string) {
@@ -100,12 +100,29 @@ export class AgentPhoneAPI {
 
   // --- Agents ---
 
+  async listVoices() {
+    return this.request<{
+      data: Array<{
+        voice_id: string;
+        voice_name: string;
+        provider: string;
+        gender: string;
+        accent: string;
+        preview_audio_url: string | null;
+      }>;
+    }>("GET", "/v1/agents/voices");
+  }
+
   async listAgents(limit = 20, offset = 0) {
     return this.request<{
       data: Array<{
         id: string;
         name: string;
         description: string | null;
+        voiceMode: string;
+        systemPrompt: string | null;
+        beginMessage: string | null;
+        voice: string;
         createdAt: string;
         numbers?: Array<{
           id: string;
@@ -113,18 +130,61 @@ export class AgentPhoneAPI {
           status: string;
         }>;
       }>;
-      hasMore: boolean;
       total: number;
     }>("GET", `/v1/agents?limit=${limit}&offset=${offset}`);
   }
 
-  async createAgent(name: string, description?: string) {
+  async createAgent(params: {
+    name: string;
+    description?: string;
+    voiceMode?: string;
+    systemPrompt?: string;
+    beginMessage?: string;
+    voice?: string;
+  }) {
     return this.request<{
       id: string;
       name: string;
       description: string | null;
+      voiceMode: string;
+      systemPrompt: string | null;
+      beginMessage: string | null;
+      voice: string;
       createdAt: string;
-    }>("POST", "/v1/agents", { name, description });
+      numbers: Array<{ id: string; phoneNumber: string; status: string }>;
+    }>("POST", "/v1/agents", params);
+  }
+
+  async updateAgent(
+    agentId: string,
+    params: {
+      name?: string;
+      description?: string;
+      voiceMode?: string;
+      systemPrompt?: string;
+      beginMessage?: string;
+      voice?: string;
+    }
+  ) {
+    return this.request<{
+      id: string;
+      name: string;
+      description: string | null;
+      voiceMode: string;
+      systemPrompt: string | null;
+      beginMessage: string | null;
+      voice: string;
+      createdAt: string;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }>;
+    }>("PATCH", `/v1/agents/${agentId}`, params);
+  }
+
+  async deleteAgent(agentId: string) {
+    return this.request<{
+      success: boolean;
+      id: string;
+      name: string;
+    }>("DELETE", `/v1/agents/${agentId}`);
   }
 
   async getAgent(agentId: string) {
@@ -132,6 +192,10 @@ export class AgentPhoneAPI {
       id: string;
       name: string;
       description: string | null;
+      voiceMode: string;
+      systemPrompt: string | null;
+      beginMessage: string | null;
+      voice: string;
       createdAt: string;
       numbers?: Array<{
         id: string;
@@ -299,5 +363,42 @@ export class AgentPhoneAPI {
 
   async deleteWebhook() {
     return this.request<{ success: boolean }>("DELETE", "/v1/webhooks");
+  }
+
+  // --- Usage ---
+
+  async getUsage() {
+    return this.request<{
+      plan: {
+        name: string;
+        limits: {
+          numbers: number;
+          messagesPerMonth: number;
+          voiceMinutesPerMonth: number;
+          maxCallDurationMinutes: number;
+          concurrentCalls: number;
+        };
+      };
+      numbers: {
+        used: number;
+        limit: number;
+        remaining: number;
+      };
+      stats: {
+        totalMessages: number;
+        messagesLast24h: number;
+        messagesLast7d: number;
+        messagesLast30d: number;
+        totalCalls: number;
+        callsLast24h: number;
+        callsLast7d: number;
+        callsLast30d: number;
+        totalWebhookDeliveries: number;
+        successfulWebhookDeliveries: number;
+        failedWebhookDeliveries: number;
+      };
+      periodStart: string;
+      periodEnd: string;
+    }>("GET", "/v1/usage");
   }
 }

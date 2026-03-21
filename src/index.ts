@@ -10,8 +10,9 @@
  *   Numbers:  list_numbers, buy_number, release_number
  *   SMS:      get_messages
  *   Calls:    list_calls, get_call, make_call, make_conversation_call
- *   Agents:   list_agents, create_agent, get_agent, attach_number
+ *   Agents:   list_agents, create_agent, update_agent, delete_agent, get_agent, attach_number, list_voices
  *   Convos:   list_conversations, get_conversation
+ *   Usage:    get_usage
  *   Webhooks: get_webhook, set_webhook, delete_webhook
  */
 
@@ -59,20 +60,26 @@ server.tool(
 
 server.tool(
   "buy_number",
-  "Purchase a new phone number. Returns the provisioned number.",
+  "Purchase a new phone number. Returns the provisioned number. " +
+    "Use area_code to request a specific region (e.g. '415' for San Francisco, '212' for NYC).",
   {
     country: z
       .string()
       .length(2)
       .default("US")
       .describe("2-letter ISO country code (e.g. US, CA, GB)"),
+    area_code: z
+      .string()
+      .length(3)
+      .optional()
+      .describe("3-digit area code to request a number in a specific region (e.g. '415', '212', '310')"),
     agent_id: z
       .string()
       .optional()
       .describe("Agent ID to attach this number to immediately"),
   },
-  async ({ country, agent_id }) => {
-    const result = await api.buyNumber(country, agent_id);
+  async ({ country, area_code, agent_id }) => {
+    const result = await api.buyNumber(country, agent_id, area_code);
     return {
       content: [
         {
@@ -302,7 +309,7 @@ server.tool(
 
 server.tool(
   "list_agents",
-  "List all agents in your account",
+  "List all agents in your account with their phone numbers and voice configuration",
   {
     limit: z.number().min(1).max(100).default(20).describe("Max results to return"),
   },
@@ -321,18 +328,108 @@ server.tool(
 
 server.tool(
   "create_agent",
-  "Create a new agent. An agent is a logical entity that owns phone numbers and handles calls.",
+  "Create a new agent. An agent owns phone numbers and handles calls/SMS. " +
+    "Set voice_mode to 'hosted' with a system_prompt for autonomous AI voice calls, " +
+    "or 'webhook' (default) to forward call transcripts to your webhook.",
   {
     name: z.string().describe("Name for the agent (e.g. 'Customer Support', 'Sales Bot')"),
     description: z.string().optional().describe("Description of what this agent does"),
+    voice_mode: z
+      .enum(["webhook", "hosted"])
+      .optional()
+      .describe("'webhook' (default) forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."),
+    system_prompt: z
+      .string()
+      .optional()
+      .describe("Required when voice_mode is 'hosted'. The AI's personality and instructions for voice calls."),
+    begin_message: z
+      .string()
+      .optional()
+      .describe("What the AI says when a call connects. Only used in 'hosted' mode."),
+    voice: z
+      .string()
+      .optional()
+      .describe("Voice ID for the agent (use list_voices to see options). Defaults to '11labs-Brian'."),
   },
-  async ({ name, description }) => {
-    const result = await api.createAgent(name, description);
+  async ({ name, description, voice_mode, system_prompt, begin_message, voice }) => {
+    const result = await api.createAgent({
+      name,
+      description,
+      voiceMode: voice_mode,
+      systemPrompt: system_prompt,
+      beginMessage: begin_message,
+      voice,
+    });
     return {
       content: [
         {
           type: "text" as const,
-          text: `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n\n${JSON.stringify(result, null, 2)}`,
+          text: `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n\n${JSON.stringify(result, null, 2)}`,
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "update_agent",
+  "Update an agent's configuration. Use this to change voice settings, system prompt, " +
+    "greeting, or switch between webhook and hosted voice modes. Only provided fields are updated.",
+  {
+    agent_id: z.string().describe("The agent ID to update"),
+    name: z.string().optional().describe("New name for the agent"),
+    description: z.string().optional().describe("New description"),
+    voice_mode: z
+      .enum(["webhook", "hosted"])
+      .optional()
+      .describe("'webhook' forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."),
+    system_prompt: z
+      .string()
+      .optional()
+      .describe("The AI's personality and instructions. Required when voice_mode is 'hosted'."),
+    begin_message: z
+      .string()
+      .optional()
+      .describe("What the AI says when a call connects (hosted mode only)."),
+    voice: z
+      .string()
+      .optional()
+      .describe("Voice ID (use list_voices to see options)."),
+  },
+  async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice }) => {
+    const params: Record<string, string | undefined> = {};
+    if (name !== undefined) params.name = name;
+    if (description !== undefined) params.description = description;
+    if (voice_mode !== undefined) params.voiceMode = voice_mode;
+    if (system_prompt !== undefined) params.systemPrompt = system_prompt;
+    if (begin_message !== undefined) params.beginMessage = begin_message;
+    if (voice !== undefined) params.voice = voice;
+
+    const result = await api.updateAgent(agent_id, params);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Agent updated!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n\n${JSON.stringify(result, null, 2)}`,
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "delete_agent",
+  "Delete an agent. Phone numbers attached to it will be kept but unassigned. This cannot be undone.",
+  {
+    agent_id: z.string().describe("The agent ID to delete"),
+  },
+  async ({ agent_id }) => {
+    const result = await api.deleteAgent(agent_id);
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Deleted agent '${result.name}' (${result.id})`,
         },
       ],
     };
@@ -341,7 +438,7 @@ server.tool(
 
 server.tool(
   "get_agent",
-  "Get details for a specific agent including its phone numbers",
+  "Get details for a specific agent including its phone numbers and voice configuration",
   {
     agent_id: z.string().describe("The agent ID"),
   },
@@ -372,6 +469,36 @@ server.tool(
         {
           type: "text" as const,
           text: `Attached number ${result.number.phoneNumber} to agent ${result.agentId}`,
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  "list_voices",
+  "List available voices for agents. Use the voice_id when creating or updating an agent.",
+  {},
+  async () => {
+    const result = await api.listVoices();
+    if (result.data.length === 0) {
+      return {
+        content: [{ type: "text" as const, text: "No voices available." }],
+      };
+    }
+
+    const formatted = result.data
+      .map(
+        (v) =>
+          `${v.voice_id} — ${v.voice_name} (${v.provider}, ${v.gender}, ${v.accent})`
+      )
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `${result.data.length} voice(s) available:\n\n${formatted}`,
         },
       ],
     };
@@ -442,6 +569,56 @@ server.tool(
             `Messages: ${result.messageCount}`,
             `\n${messages}`,
           ].join("\n"),
+        },
+      ],
+    };
+  }
+);
+
+// ============================================================
+// Usage
+// ============================================================
+
+server.tool(
+  "get_usage",
+  "Get account usage statistics including plan limits, number quotas, message/call counts, and webhook delivery stats",
+  {},
+  async () => {
+    const result = await api.getUsage();
+
+    const lines = [
+      `Plan: ${result.plan.name}`,
+      ``,
+      `Phone Numbers: ${result.numbers.used}/${result.numbers.limit} (${result.numbers.remaining} remaining)`,
+      ``,
+      `Messages:`,
+      `  Total: ${result.stats.totalMessages}`,
+      `  Last 24h: ${result.stats.messagesLast24h}`,
+      `  Last 7d: ${result.stats.messagesLast7d}`,
+      `  Last 30d: ${result.stats.messagesLast30d}`,
+      ``,
+      `Calls:`,
+      `  Total: ${result.stats.totalCalls}`,
+      `  Last 24h: ${result.stats.callsLast24h}`,
+      `  Last 7d: ${result.stats.callsLast7d}`,
+      `  Last 30d: ${result.stats.callsLast30d}`,
+      ``,
+      `Webhooks:`,
+      `  Delivered: ${result.stats.totalWebhookDeliveries} (${result.stats.successfulWebhookDeliveries} ok, ${result.stats.failedWebhookDeliveries} failed)`,
+      ``,
+      `Plan Limits:`,
+      `  Max numbers: ${result.plan.limits.numbers}`,
+      `  Messages/month: ${result.plan.limits.messagesPerMonth}`,
+      `  Voice minutes/month: ${result.plan.limits.voiceMinutesPerMonth}`,
+      `  Max call duration: ${result.plan.limits.maxCallDurationMinutes} min`,
+      `  Concurrent calls: ${result.plan.limits.concurrentCalls}`,
+    ];
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: lines.join("\n"),
         },
       ],
     };
