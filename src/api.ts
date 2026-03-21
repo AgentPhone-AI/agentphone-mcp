@@ -235,12 +235,14 @@ export class AgentPhoneAPI {
     return this.request<{
       data: Array<{
         id: string;
-        phoneNumber: string;
-        contactNumber: string;
-        channel: string;
-        lastMessageAt: string | null;
-        messageCount: number;
         agentId: string | null;
+        phoneNumberId: string;
+        phoneNumber: string;
+        participant: string;
+        lastMessageAt: string | null;
+        lastMessagePreview: string;
+        messageCount: number;
+        createdAt: string;
       }>;
       hasMore: boolean;
       total: number;
@@ -250,16 +252,19 @@ export class AgentPhoneAPI {
   async getConversation(conversationId: string, messageLimit = 50) {
     return this.request<{
       id: string;
+      agentId: string | null;
+      phoneNumberId: string;
       phoneNumber: string;
-      contactNumber: string;
-      channel: string;
+      participant: string;
       lastMessageAt: string | null;
       messageCount: number;
+      createdAt: string;
       messages: Array<{
         id: string;
-        from: string;
-        to: string;
         body: string;
+        fromNumber: string;
+        toNumber: string;
+        direction: string;
         receivedAt: string;
       }>;
     }>(

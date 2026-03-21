@@ -22,7 +22,7 @@ import { AgentPhoneAPI } from "./api.js";
 
 const API_KEY = process.env.AGENTPHONE_API_KEY;
 const BASE_URL =
-  process.env.AGENTPHONE_BASE_URL || "https://agentphone-backend-production.up.railway.app";
+  process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.to";
 
 if (!API_KEY) {
   console.error("AGENTPHONE_API_KEY environment variable is required");
@@ -399,7 +399,7 @@ server.tool(
     const formatted = result.data
       .map(
         (c) =>
-          `${c.contactNumber} ↔ ${c.phoneNumber} (${c.channel}, ${c.messageCount} msgs, last: ${c.lastMessageAt || "never"})`
+          `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"}) id=${c.id}`
       )
       .join("\n");
 
@@ -427,7 +427,7 @@ server.tool(
     let messages = "No messages.";
     if (result.messages && result.messages.length > 0) {
       messages = result.messages
-        .map((m) => `[${m.receivedAt}] ${m.from}: ${m.body}`)
+        .map((m) => `[${m.receivedAt}] ${m.fromNumber}: ${m.body}`)
         .join("\n");
     }
 
@@ -437,9 +437,8 @@ server.tool(
           type: "text" as const,
           text: [
             `Conversation ${result.id}`,
-            `Contact: ${result.contactNumber}`,
+            `Contact: ${result.participant}`,
             `Number: ${result.phoneNumber}`,
-            `Channel: ${result.channel}`,
             `Messages: ${result.messageCount}`,
             `\n${messages}`,
           ].join("\n"),
