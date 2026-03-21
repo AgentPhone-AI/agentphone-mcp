@@ -212,6 +212,41 @@ export class AgentPhoneAPI {
     }>("POST", `/v1/agents/${agentId}/numbers`, { numberId });
   }
 
+  // --- Agent Webhooks ---
+
+  async getAgentWebhook(agentId: string) {
+    return this.request<{
+      id: string;
+      url: string;
+      secret: string;
+      status: string;
+      contextLimit: number;
+      createdAt: string;
+    } | null>("GET", `/v1/agents/${agentId}/webhook`);
+  }
+
+  async setAgentWebhook(
+    agentId: string,
+    url: string,
+    contextLimit?: number
+  ) {
+    return this.request<{
+      id: string;
+      url: string;
+      secret: string;
+      status: string;
+      contextLimit: number;
+      createdAt: string;
+    }>("POST", `/v1/agents/${agentId}/webhook`, { url, contextLimit });
+  }
+
+  async deleteAgentWebhook(agentId: string) {
+    return this.request<{ success: boolean }>(
+      "DELETE",
+      `/v1/agents/${agentId}/webhook`
+    );
+  }
+
   // --- Calls ---
 
   async listCalls(limit = 20, offset = 0) {
@@ -291,6 +326,24 @@ export class AgentPhoneAPI {
       systemPrompt,
       initialGreeting,
     });
+  }
+
+  async listCallsForNumber(numberId: string, limit = 20, offset = 0) {
+    return this.request<{
+      data: Array<{
+        id: string;
+        fromNumber: string;
+        toNumber: string;
+        direction: string;
+        status: string;
+        startedAt: string;
+        endedAt: string | null;
+        agentId: string | null;
+        phoneNumberId: string;
+      }>;
+      hasMore: boolean;
+      total: number;
+    }>("GET", `/v1/numbers/${numberId}/calls?limit=${limit}&offset=${offset}`);
   }
 
   // --- Conversations ---

@@ -1,6 +1,6 @@
 {
   "name": "agentphone-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MCP server for AgentPhone — give AI agents phone numbers, SMS, and voice calls",
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build"
