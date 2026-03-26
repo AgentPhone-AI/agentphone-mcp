@@ -10,11 +10,33 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 Sign up at [agentphone.to](https://agentphone.to) and create an API key from **Settings**.
 
-### 2. Add to Cursor or Claude Desktop
+### 2. Connect via MCP
 
-Both use the same config. Add this under `mcpServers`:
+**Option A: Remote server (recommended)**
 
-**Cursor:** **Settings > MCP** or `~/.cursor/mcp.json`  
+Point your MCP client at the hosted endpoint — no install needed:
+
+```json
+{
+  "mcpServers": {
+    "agentphone": {
+      "type": "streamable-http",
+      "url": "https://mcp.agentphone.to/mcp",
+      "headers": {
+        "Authorization": "Bearer your_api_key_here"
+      }
+    }
+  }
+}
+```
+
+Works with any MCP client that supports Streamable HTTP transport (Switchboard, remote agent platforms, etc.).
+
+**Option B: Local server (stdio)**
+
+Runs locally via `npx` — works with Cursor, Claude Desktop, Windsurf, and Claude Code:
+
+**Cursor:** Settings > MCP or `~/.cursor/mcp.json`
 **Claude Desktop:** `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
 
 ```json
@@ -24,15 +46,22 @@ Both use the same config. Add this under `mcpServers`:
       "command": "npx",
       "args": ["-y", "agentphone-mcp"],
       "env": {
-        "AGENTPHONE_API_KEY": "your_api_key_here",
-        "AGENTPHONE_BASE_URL": "https://api.agentphone.to"
+        "AGENTPHONE_API_KEY": "your_api_key_here"
       }
     }
   }
 }
 ```
 
-You can also run the built server with `node` and a path to `dist/index.js` (e.g. after cloning and building this repo).
+**Option C: Self-hosted HTTP server**
+
+Run your own HTTP MCP endpoint:
+
+```bash
+AGENTPHONE_API_KEY=your_api_key npx agentphone-mcp --http --port 3000
+```
+
+Then connect to `http://localhost:3000/mcp`.
 
 ## What Can It Do?
 
@@ -46,6 +75,29 @@ Once configured, just ask your AI agent things like:
 - *"List the available voices and switch my agent to a different one"*
 - *"Set up a webhook to receive inbound messages"*
 - *"How many numbers can I still provision?"*
+
+## Transports
+
+| Transport | Command | Use case |
+|-----------|---------|----------|
+| **Streamable HTTP** (remote) | `https://mcp.agentphone.to/mcp` | Agent platforms (Switchboard, etc.), remote clients |
+| **Streamable HTTP** (self-hosted) | `npx agentphone-mcp --http --port 3000` | Your own infrastructure |
+| **stdio** (default) | `npx agentphone-mcp` | Cursor, Claude Desktop, Windsurf, Claude Code |
+
+### Authentication
+
+- **stdio:** API key via `AGENTPHONE_API_KEY` environment variable
+- **HTTP (self-hosted):** API key via env var or `Authorization: Bearer <key>` header per request
+- **HTTP (hosted):** API key via `Authorization: Bearer <key>` header per request
+
+### Endpoints (HTTP mode)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/mcp` | MCP Streamable HTTP endpoint |
+| `GET` | `/mcp` | SSE stream (with `Mcp-Session-Id` header) |
+| `DELETE` | `/mcp` | Close session |
+| `GET` | `/health` | Health check |
 
 ## Available Tools (26)
 
@@ -114,8 +166,9 @@ Once configured, just ask your AI agent things like:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AGENTPHONE_API_KEY` | Yes | Your AgentPhone API key |
+| `AGENTPHONE_API_KEY` | stdio: yes, HTTP: no | Your AgentPhone API key (HTTP mode can use Authorization header instead) |
 | `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.to`) |
+| `PORT` | No | Port for HTTP mode (defaults to `3000`, overridden by `--port`) |
 
 ## Development
 
@@ -125,15 +178,21 @@ cd agentphone-mcp
 npm install
 npm run dev     # Run with tsx (hot reload)
 npm run build   # Compile TypeScript
-npm start       # Run compiled JS
+npm start       # Run compiled JS (stdio)
 ```
 
 ## How It Works
 
-This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.to). It runs as a local process that your AI client (Cursor, Claude Desktop, etc.) communicates with over stdio.
+This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.to). It supports two transport modes:
 
+**stdio** — runs as a local process that your AI client communicates with over standard input/output:
 ```
 Your AI Assistant  <-->  agentphone-mcp (local)  <-->  AgentPhone API  <-->  Phone Network
+```
+
+**Streamable HTTP** — runs as an HTTP server that remote MCP clients connect to:
+```
+Remote MCP Client  -->  mcp.agentphone.to/mcp  <-->  AgentPhone API  <-->  Phone Network
 ```
 
 The MCP server itself is stateless — it's a thin typed client that translates MCP tool calls into AgentPhone API requests. All state (numbers, calls, messages) lives on the AgentPhone platform.
