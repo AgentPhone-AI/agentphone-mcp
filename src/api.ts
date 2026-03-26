@@ -267,7 +267,13 @@ export class AgentPhoneAPI {
     }>("GET", `/v1/calls?limit=${limit}&offset=${offset}`);
   }
 
-  async getCall(callId: string) {
+  async getCall(callId: string, opts?: { wait?: boolean; timeout?: number }) {
+    let path = `/v1/calls/${callId}`;
+    const params: string[] = [];
+    if (opts?.wait) params.push("wait=true");
+    if (opts?.timeout) params.push(`timeout=${opts.timeout}`);
+    if (params.length) path += `?${params.join("&")}`;
+
     return this.request<{
       id: string;
       fromNumber: string;
@@ -283,7 +289,7 @@ export class AgentPhoneAPI {
         response: string | null;
         createdAt: string;
       }>;
-    }>("GET", `/v1/calls/${callId}`);
+    }>("GET", path);
   }
 
   async makeCall(
@@ -310,8 +316,19 @@ export class AgentPhoneAPI {
     agentId: string,
     toNumber: string,
     systemPrompt: string,
-    initialGreeting?: string
+    initialGreeting?: string,
+    waitForCompletion?: boolean,
+    maxWaitSeconds?: number
   ) {
+    const body: Record<string, unknown> = {
+      agentId,
+      toNumber,
+      systemPrompt,
+      initialGreeting,
+    };
+    if (waitForCompletion !== undefined) body.waitForCompletion = waitForCompletion;
+    if (maxWaitSeconds !== undefined) body.maxWaitSeconds = maxWaitSeconds;
+
     return this.request<{
       id: string;
       fromNumber: string;
@@ -319,13 +336,15 @@ export class AgentPhoneAPI {
       direction: string;
       status: string;
       startedAt: string;
+      endedAt: string | null;
       retellCallId: string | null;
-    }>("POST", "/v1/calls", {
-      agentId,
-      toNumber,
-      systemPrompt,
-      initialGreeting,
-    });
+      transcripts?: Array<{
+        id: string;
+        transcript: string;
+        response: string | null;
+        createdAt: string;
+      }>;
+    }>("POST", "/v1/calls", body);
   }
 
   async listCallsForNumber(numberId: string, limit = 20, offset = 0) {

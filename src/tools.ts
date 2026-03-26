@@ -299,13 +299,27 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_call",
-    "Get details and transcript for a specific call. Use list_calls to find call IDs.",
+    "Get details and transcript for a specific call. Use list_calls to find call IDs. " +
+      "Pass wait=true to block until an in-progress call finishes before returning.",
     {
       call_id: z.string().describe("The call ID"),
+      wait: z
+        .boolean()
+        .default(false)
+        .describe(
+          "When true, long-polls until the call completes before returning. " +
+            "Useful for checking back on a call you initiated earlier."
+        ),
+      timeout: z
+        .number()
+        .min(10)
+        .max(300)
+        .default(120)
+        .describe("Max seconds to wait when wait=true. Defaults to 120."),
     },
-    async ({ call_id }) => {
+    async ({ call_id, wait, timeout }) => {
       try {
-        const result = await api.getCall(call_id);
+        const result = await api.getCall(call_id, { wait, timeout });
 
         let transcript = "No transcript available.";
         if (result.transcripts && result.transcripts.length > 0) {
@@ -379,6 +393,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     "Place a phone call where the AI has an autonomous conversation about a given topic. " +
       "Unlike make_call (which forwards to a webhook), this uses a built-in LLM so the AI " +
       "can hold a full conversation without any webhook setup. " +
+      "By default, this blocks until the call finishes and returns the full transcript — " +
+      "one tool call does everything. Set wait=false if you want fire-and-forget. " +
       "The agent must have a phone number attached — use list_agents to check.",
     {
       agent_id: z
@@ -401,15 +417,58 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe(
           "What the AI says when the call connects. If not set, the AI will generate one from the topic."
         ),
+      wait: z
+        .boolean()
+        .default(true)
+        .describe(
+          "When true (default), blocks until the call ends and returns the full transcript inline. " +
+            "Set to false to return immediately after the call is initiated."
+        ),
+      max_wait_seconds: z
+        .number()
+        .min(10)
+        .max(600)
+        .default(300)
+        .describe(
+          "Maximum seconds to wait for the call to complete. Defaults to 300 (5 minutes)."
+        ),
     },
-    async ({ agent_id, to_number, topic, initial_greeting }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, wait, max_wait_seconds }) => {
       try {
         const result = await api.makeConversationCall(
           agent_id,
           to_number,
           topic,
-          initial_greeting
+          initial_greeting,
+          wait,
+          max_wait_seconds
         );
+
+        if (wait && result.transcripts && result.transcripts.length > 0) {
+          const transcript = result.transcripts
+            .map((t) => {
+              const response = t.response ? `\n  Agent: ${t.response}` : "";
+              return `  Human: ${t.transcript}${response}`;
+            })
+            .join("\n");
+
+          return ok(
+            [
+              `Call completed!`,
+              `  From: ${result.fromNumber}`,
+              `  To: ${result.toNumber}`,
+              `  Call ID: ${result.id}`,
+              `  Status: ${result.status}`,
+              result.endedAt ? `  Ended: ${result.endedAt}` : null,
+              ``,
+              `Transcript:`,
+              transcript,
+            ]
+              .filter(Boolean)
+              .join("\n")
+          );
+        }
+
         return ok(
           [
             `Conversation call initiated!`,
@@ -418,8 +477,9 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
             `  Call ID: ${result.id}`,
             `  Status: ${result.status}`,
             ``,
-            `The AI will have an autonomous conversation about the topic you provided.`,
-            `Use get_call with the call ID to check the transcript once the call ends.`,
+            wait
+              ? `Call ended but no transcript was recorded.`
+              : `The AI will have an autonomous conversation about the topic you provided.\nUse get_call with the call ID to check the transcript once the call ends.`,
           ].join("\n")
         );
       } catch (e) {
