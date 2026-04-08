@@ -29,7 +29,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 import { AgentPhoneAPI } from "./api.js";
 import { registerTools } from "./tools.js";
 
@@ -105,17 +104,15 @@ async function startStdio(): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // HTTP transport (--http)
+//
+// Stateless mode: each POST creates a fresh McpServer + transport so the
+// server works on platforms that don't guarantee sticky routing (Railway,
+// serverless, etc.). AgentPhone's MCP server is a stateless proxy to the
+// REST API, so no session persistence is needed.
 // ---------------------------------------------------------------------------
-
-interface SessionEntry {
-  transport: StreamableHTTPServerTransport;
-  apiKey: string;
-}
 
 async function startHttp(): Promise<void> {
   console.error(`Starting AgentPhone MCP server in HTTP mode on port ${port}...`);
-
-  const sessions = new Map<string, SessionEntry>();
 
   const httpServer = createServer(
     async (req: IncomingMessage, res: ServerResponse) => {
@@ -135,87 +132,46 @@ async function startHttp(): Promise<void> {
         return;
       }
 
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
       if (req.method === "POST") {
-        if (sessionId && sessions.has(sessionId)) {
-          // Existing session — route to its transport
-          await sessions.get(sessionId)!.transport.handleRequest(req, res);
-        } else if (!sessionId) {
-          // New session — resolve API key, spin up a fresh McpServer + transport
-          const apiKey = resolveApiKey(req);
-          if (!apiKey) {
-            res.writeHead(401, { "Content-Type": "application/json" });
-            res.end(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                error: {
-                  code: -32000,
-                  message:
-                    "Authentication required. Pass your AgentPhone API key via Authorization: Bearer <key>",
-                },
-                id: null,
-              })
-            );
-            return;
-          }
-
-          const api = new AgentPhoneAPI(BASE_URL, apiKey);
-          const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-          });
-
-          const server = createMcpServer(api);
-          await server.connect(transport);
-
-          sessions.set(transport.sessionId!, { transport, apiKey });
-
-          transport.onclose = () => {
-            sessions.delete(transport.sessionId!);
-          };
-
-          await transport.handleRequest(req, res);
-        } else {
-          // Session ID provided but not found (expired / invalid)
-          res.writeHead(404, { "Content-Type": "application/json" });
+        const apiKey = resolveApiKey(req);
+        if (!apiKey) {
+          res.writeHead(401, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
               jsonrpc: "2.0",
-              error: { code: -32000, message: "Session not found" },
+              error: {
+                code: -32000,
+                message:
+                  "Authentication required. Pass your AgentPhone API key via Authorization: Bearer <key>",
+              },
               id: null,
             })
           );
+          return;
         }
+
+        const api = new AgentPhoneAPI(BASE_URL, apiKey);
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined,
+        });
+
+        const server = createMcpServer(api);
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
       } else if (req.method === "GET") {
-        // GET /mcp — SSE stream for server-sent notifications
-        if (sessionId && sessions.has(sessionId)) {
-          await sessions.get(sessionId)!.transport.handleRequest(req, res);
-        } else {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              error: { code: -32000, message: "Session ID required" },
-              id: null,
-            })
-          );
-        }
+        // SSE streaming is not supported in stateless mode
+        res.writeHead(405, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: { code: -32000, message: "SSE streaming not supported in stateless mode. Use POST requests." },
+            id: null,
+          })
+        );
       } else if (req.method === "DELETE") {
-        // DELETE /mcp — close session
-        if (sessionId && sessions.has(sessionId)) {
-          const entry = sessions.get(sessionId)!;
-          await entry.transport.handleRequest(req, res);
-          sessions.delete(sessionId);
-        } else {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              error: { code: -32000, message: "Session not found" },
-              id: null,
-            })
-          );
-        }
+        // No sessions to close in stateless mode
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ jsonrpc: "2.0", result: {}, id: null }));
       } else {
         res.writeHead(405, { "Content-Type": "application/json" });
         res.end(
