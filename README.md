@@ -4,6 +4,8 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 **AgentPhone** lets your AI agent buy phone numbers, send/receive SMS, and place voice calls — all through natural language in Cursor, Claude Desktop, or any MCP-compatible client.
 
+**Agents** are the core concept — each agent gets its own phone numbers, voice personality, system prompt, and webhook. Think of an agent as a virtual team member with its own phone line. You can create agents for different purposes (support, sales, scheduling) and configure how they sound and behave on calls.
+
 ## Quick Start
 
 ### 1. Get your API key
@@ -67,16 +69,13 @@ Then connect to `http://localhost:3000/mcp`.
 
 Once configured, just ask your AI agent things like:
 
-- *"Show me an overview of my account"*
 - *"Buy me a phone number in the 415 area code"*
-- *"Create a support agent with a hosted AI voice that greets callers and helps with billing"*
+- *"Create a support agent that greets callers and helps with billing"*
 - *"Call +14155551234 and have a conversation about scheduling a dentist appointment"*
 - *"Text +14155551234 saying 'Your appointment is confirmed for 3pm tomorrow'"*
 - *"Show me my recent calls and transcripts"*
 - *"List the available voices and switch my agent to a different one"*
-- *"Set up a webhook to receive inbound messages"*
-- *"Test my webhook to make sure it's working"*
-- *"How many numbers can I still provision?"*
+- *"Set up a webhook so I get notified when someone calls or texts my number"*
 - *"Show me this month's usage breakdown"*
 
 ## Transports
@@ -100,7 +99,16 @@ Once configured, just ask your AI agent things like:
 | `POST` | `/mcp` | MCP Streamable HTTP endpoint (stateless — each request is independent) |
 | `GET` | `/health` | Health check |
 
-## Available Tools (37)
+## Highlights
+
+- **Phone numbers** — buy, list, and release numbers in any US/CA area code
+- **SMS** — send and receive text messages, view conversation threads
+- **Voice calls** — place outbound calls with built-in AI conversation (no webhook needed) or bring your own webhook
+- **Inbound handling** — set up webhooks to receive and respond to inbound calls and texts in real time
+- **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
+- **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
+
+## All Tools (37)
 
 ### Account
 
@@ -195,19 +203,15 @@ npm start       # Run compiled JS (stdio)
 
 ## How It Works
 
-This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.to). It supports two transport modes:
+This MCP server connects your AI assistant to the [AgentPhone API](https://agentphone.to). Your assistant talks to the MCP server, which calls the AgentPhone API, which talks to the phone network.
 
-**stdio** — runs as a local process that your AI client communicates with over standard input/output:
 ```
-Your AI Assistant  <-->  agentphone-mcp (local)  <-->  AgentPhone API  <-->  Phone Network
-```
-
-**Streamable HTTP** — runs as an HTTP server that remote MCP clients connect to:
-```
-Remote MCP Client  -->  mcp.agentphone.to/mcp  <-->  AgentPhone API  <-->  Phone Network
+Your AI Assistant  <-->  agentphone-mcp  <-->  AgentPhone API  <-->  Phone Network
 ```
 
-The MCP server itself is stateless — it's a thin typed client that translates MCP tool calls into AgentPhone API requests. All state (numbers, calls, messages) lives on the AgentPhone platform.
+**Outbound**: your assistant places calls and sends texts through AgentPhone's API.
+
+**Inbound**: when someone calls or texts your number, AgentPhone sends a webhook event to your server — you can then respond programmatically or let your agent's built-in AI handle it.
 
 ## License
 
