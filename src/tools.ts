@@ -1,12 +1,12 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * All 26 MCP tools, extracted so they can be registered on any McpServer instance.
+ * 37 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { AgentPhoneAPI } from "./api.js";
+import { AgentPhoneAPI, ApiError } from "./api.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -18,9 +18,55 @@ function ok(text: string): ToolResult {
 }
 
 function err(error: unknown): ToolResult {
-  const message =
-    error instanceof Error ? error.message : String(error);
+  if (error instanceof ApiError) {
+    const base = error.detail;
+    let hint = "";
+    switch (error.status) {
+      case 401:
+        hint = " Check your AGENTPHONE_API_KEY.";
+        break;
+      case 404:
+        if (error.path.includes("/agents/"))
+          hint = " Use list_agents to see valid agent IDs.";
+        else if (error.path.includes("/numbers/"))
+          hint = " Use list_numbers to see valid number IDs.";
+        else if (error.path.includes("/calls/"))
+          hint = " Use list_calls to see recent call IDs.";
+        else if (error.path.includes("/conversations/"))
+          hint = " Use list_conversations to see valid conversation IDs.";
+        break;
+      case 429:
+        hint = " Rate limited — wait a moment and try again.";
+        break;
+    }
+    return { content: [{ type: "text", text: base + hint }], isError: true };
+  }
+  const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+// --- Validation helpers ---
+
+const E164_REGEX = /^\+[1-9]\d{1,14}$/;
+const COUNTRY_REGEX = /^[A-Z]{2}$/;
+const AREA_CODE_REGEX = /^\d{3}$/;
+
+function validateE164(phone: string): string | null {
+  if (!E164_REGEX.test(phone))
+    return "Phone number must be in E.164 format, e.g. +14155551234";
+  return null;
+}
+
+function validateCountry(code: string): string | null {
+  if (!COUNTRY_REGEX.test(code))
+    return "Country must be a 2-letter ISO code, e.g. US, CA, GB";
+  return null;
+}
+
+function validateAreaCode(code: string): string | null {
+  if (!AREA_CODE_REGEX.test(code))
+    return "Area code must be 3 digits, e.g. 415, 212, 310";
+  return null;
 }
 
 export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
@@ -33,54 +79,72 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     "Get a complete snapshot of your AgentPhone account: agents, phone numbers, webhook status, " +
       "and usage limits. Call this first to orient yourself before using other tools.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       try {
-        const [agents, numbers, webhook, usage] = await Promise.all([
+        const results = await Promise.allSettled([
           api.listAgents(100),
           api.listNumbers(100),
           api.getWebhook(),
           api.getUsage(),
         ]);
 
+        const agents = results[0].status === "fulfilled" ? results[0].value : null;
+        const numbers = results[1].status === "fulfilled" ? results[1].value : null;
+        const webhook = results[2].status === "fulfilled" ? results[2].value : null;
+        const usage = results[3].status === "fulfilled" ? results[3].value : null;
+
         const sections: string[] = [];
 
         sections.push(`=== Account Overview ===`);
-        sections.push(`Plan: ${usage.plan.name}`);
-        sections.push(
-          `Phone Numbers: ${usage.numbers.used}/${usage.numbers.limit} used (${usage.numbers.remaining} remaining)`
-        );
-        sections.push(``);
-
-        if (agents.data.length > 0) {
-          sections.push(`--- Agents (${agents.data.length}) ---`);
-          for (const a of agents.data) {
-            const nums =
-              a.numbers && a.numbers.length > 0
-                ? a.numbers.map((n) => n.phoneNumber).join(", ")
-                : "no numbers";
-            sections.push(
-              `  ${a.name} (id=${a.id}, voiceMode=${a.voiceMode}, ${nums})`
-            );
-          }
-        } else {
-          sections.push(`--- Agents ---`);
-          sections.push(`  None yet. Use create_agent to get started.`);
+        if (usage) {
+          sections.push(`Plan: ${usage.plan.name}`);
+          sections.push(
+            `Phone Numbers: ${usage.numbers.used}/${usage.numbers.limit} used (${usage.numbers.remaining} remaining)`
+          );
         }
         sections.push(``);
 
-        if (numbers.data.length > 0) {
-          sections.push(`--- Phone Numbers (${numbers.data.length}) ---`);
-          for (const n of numbers.data) {
-            const agent = n.agentId
-              ? `agent=${n.agentId}`
-              : "unassigned";
-            sections.push(
-              `  ${n.phoneNumber} (id=${n.id}, ${n.country}, ${n.status}, ${agent})`
-            );
+        if (agents) {
+          if (agents.data.length > 0) {
+            sections.push(`--- Agents (${agents.data.length}) ---`);
+            for (const a of agents.data) {
+              const nums =
+                a.numbers && a.numbers.length > 0
+                  ? a.numbers.map((n) => n.phoneNumber).join(", ")
+                  : "no numbers";
+              sections.push(
+                `  ${a.name} (id=${a.id}, voiceMode=${a.voiceMode}, ${nums})`
+              );
+            }
+          } else {
+            sections.push(`--- Agents ---`);
+            sections.push(`  None yet. Use create_agent to get started.`);
+          }
+        } else {
+          sections.push(`--- Agents ---`);
+          sections.push(`  Failed to load. ${results[0].status === "rejected" ? results[0].reason : ""}`);
+        }
+        sections.push(``);
+
+        if (numbers) {
+          if (numbers.data.length > 0) {
+            sections.push(`--- Phone Numbers (${numbers.data.length}) ---`);
+            for (const n of numbers.data) {
+              const agent = n.agentId
+                ? `agent=${n.agentId}`
+                : "unassigned";
+              sections.push(
+                `  ${n.phoneNumber} (id=${n.id}, ${n.country}, ${n.status}, ${agent})`
+              );
+            }
+          } else {
+            sections.push(`--- Phone Numbers ---`);
+            sections.push(`  None yet. Use buy_number to provision one.`);
           }
         } else {
           sections.push(`--- Phone Numbers ---`);
-          sections.push(`  None yet. Use buy_number to provision one.`);
+          sections.push(`  Failed to load.`);
         }
         sections.push(``);
 
@@ -88,17 +152,21 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (webhook) {
           sections.push(`  URL: ${webhook.url}`);
           sections.push(`  Status: ${webhook.status}`);
-        } else {
+        } else if (results[2].status === "fulfilled") {
           sections.push(
             `  Not configured. Use set_webhook to receive inbound messages and call events.`
           );
+        } else {
+          sections.push(`  Failed to load.`);
         }
         sections.push(``);
 
-        sections.push(`--- Recent Activity ---`);
-        sections.push(
-          `  Messages (30d): ${usage.stats.messagesLast30d}  Calls (30d): ${usage.stats.callsLast30d}`
-        );
+        if (usage) {
+          sections.push(`--- Recent Activity ---`);
+          sections.push(
+            `  Messages (30d): ${usage.stats.messagesLast30d}  Calls (30d): ${usage.stats.callsLast30d}`
+          );
+        }
 
         return ok(sections.join("\n"));
       } catch (e) {
@@ -123,6 +191,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(20)
         .describe("Max results to return"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ limit }) => {
       try {
         const result = await api.listNumbers(limit);
@@ -136,8 +205,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   server.tool(
     "buy_number",
     "Purchase a new phone number. Use area_code to request a specific region (e.g. '415' for " +
-      "San Francisco). Tip: pass agent_id to attach it immediately, or use attach_number later. " +
-      "Check get_usage first to see how many numbers you can still provision.",
+      "San Francisco). Tip: pass agent_id to attach it immediately, or use attach_number later.",
     {
       country: z
         .string()
@@ -148,15 +216,21 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .length(3)
         .optional()
-        .describe(
-          "3-digit area code for a specific region (e.g. '415', '212', '310')"
-        ),
+        .describe("3-digit area code for a specific region (e.g. '415', '212', '310')"),
       agent_id: z
         .string()
         .optional()
         .describe("Agent ID to attach this number to immediately"),
     },
+    { openWorldHint: true },
     async ({ country, area_code, agent_id }) => {
+      const countryErr = validateCountry(country);
+      if (countryErr) return err(new Error(countryErr));
+      if (area_code) {
+        const areaErr = validateAreaCode(area_code);
+        if (areaErr) return err(new Error(areaErr));
+      }
+
       try {
         const result = await api.buyNumber(country, agent_id, area_code);
         return ok(
@@ -170,13 +244,16 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "release_number",
-    "Release (delete) a phone number. This is irreversible — the number goes back to the carrier pool. " +
+    "Release (delete) a phone number permanently. The number goes back to the carrier pool and cannot be recovered.\n\n" +
+      "USE THIS TOOL WHEN the user explicitly wants to remove a number they no longer need.\n" +
+      "DO NOT USE without confirming with the user — this is irreversible.\n\n" +
       "Use list_numbers to find the number ID.",
     {
       number_id: z
         .string()
         .describe("The ID of the phone number to release"),
     },
+    { destructiveHint: true, openWorldHint: true },
     async ({ number_id }) => {
       try {
         const result = await api.releaseNumber(number_id);
@@ -194,6 +271,54 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   // ============================================================
 
   server.tool(
+    "send_message",
+    "Send an SMS or iMessage from one of your agent's phone numbers.\n\n" +
+      "USE THIS TOOL WHEN the user wants to text someone.\n" +
+      "The agent must have at least one phone number attached. If the agent has multiple numbers, " +
+      "use number_id to specify which one to send from.",
+    {
+      agent_id: z
+        .string()
+        .describe("The agent ID (must have a phone number attached — use list_agents to check)"),
+      to_number: z
+        .string()
+        .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
+      body: z
+        .string()
+        .describe("The message text to send"),
+      media_url: z
+        .string()
+        .url()
+        .optional()
+        .describe("URL of an image or media file to attach (MMS)"),
+      number_id: z
+        .string()
+        .optional()
+        .describe("Specific phone number ID to send from (if agent has multiple numbers)"),
+    },
+    { openWorldHint: true },
+    async ({ agent_id, to_number, body, media_url, number_id }) => {
+      const phoneErr = validateE164(to_number);
+      if (phoneErr) return err(new Error(phoneErr));
+
+      try {
+        const result = await api.sendMessage({
+          agentId: agent_id,
+          toNumber: to_number,
+          body,
+          mediaUrl: media_url,
+          numberId: number_id,
+        });
+        return ok(
+          `Message sent!\n  From: ${result.from}\n  To: ${result.to}\n  Status: ${result.status}\n  ID: ${result.id}`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
     "get_messages",
     "Get SMS messages for a specific phone number. Use list_numbers to find the number ID. " +
       "For threaded conversations, use list_conversations + get_conversation instead.",
@@ -206,6 +331,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(50)
         .describe("Max messages to return"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ number_id, limit }) => {
       try {
         const result = await api.getMessages(number_id, limit);
@@ -230,7 +356,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_calls",
-    "List recent phone calls across all numbers. Use get_call with a call ID to fetch the full transcript.",
+    "List recent phone calls across all numbers. Use get_call with a call ID to fetch the full transcript. " +
+      "Filter by status, direction, or search keyword.",
     {
       limit: z
         .number()
@@ -238,10 +365,23 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      status: z
+        .string()
+        .optional()
+        .describe("Filter by call status (e.g. 'completed', 'failed', 'in-progress')"),
+      direction: z
+        .string()
+        .optional()
+        .describe("Filter by direction: 'inbound' or 'outbound'"),
+      search: z
+        .string()
+        .optional()
+        .describe("Search by phone number or keyword"),
     },
-    async ({ limit }) => {
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ limit, status, direction, search }) => {
       try {
-        const result = await api.listCalls(limit);
+        const result = await api.listCalls(limit, 0, { status, direction, search });
         if (result.data.length === 0) {
           return ok("No calls found.");
         }
@@ -274,6 +414,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(20)
         .describe("Max results to return"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ number_id, limit }) => {
       try {
         const result = await api.listCallsForNumber(number_id, limit);
@@ -317,6 +458,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(120)
         .describe("Max seconds to wait when wait=true. Defaults to 120."),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ call_id, wait, timeout }) => {
       try {
         const result = await api.getCall(call_id, { wait, timeout });
@@ -353,31 +495,44 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "make_call",
-    "Initiate an outbound phone call. The agent must have at least one phone number attached. " +
-      "Requires a webhook to handle the conversation — use set_webhook or set_agent_webhook first. " +
-      "For autonomous AI calls without a webhook, use make_conversation_call instead.",
+    "Initiate an outbound phone call.\n\n" +
+      "USE THIS TOOL WHEN the user wants to place a webhook-driven call where your backend " +
+      "handles the conversation logic.\n" +
+      "DO NOT USE when the user wants an autonomous AI conversation — use make_conversation_call instead.\n\n" +
+      "The agent must have a phone number attached and a webhook configured " +
+      "(set_webhook or set_agent_webhook).",
     {
       agent_id: z
         .string()
-        .describe(
-          "The agent ID (must have a phone number attached — use list_agents to check)"
-        ),
+        .describe("The agent ID (must have a phone number attached — use list_agents to check)"),
       to_number: z
         .string()
-        .describe(
-          "Recipient phone number in E.164 format (e.g. +14155551234)"
-        ),
+        .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
       initial_greeting: z
         .string()
         .optional()
         .describe("What the agent says when the call connects"),
+      from_number_id: z
+        .string()
+        .optional()
+        .describe("Specific phone number ID to call from (if agent has multiple numbers)"),
+      voice: z
+        .string()
+        .optional()
+        .describe("Voice ID override for this call (use list_voices to see options)"),
     },
-    async ({ agent_id, to_number, initial_greeting }) => {
+    { openWorldHint: true },
+    async ({ agent_id, to_number, initial_greeting, from_number_id, voice }) => {
+      const phoneErr = validateE164(to_number);
+      if (phoneErr) return err(new Error(phoneErr));
+
       try {
         const result = await api.makeCall(
           agent_id,
           to_number,
-          initial_greeting
+          initial_greeting,
+          from_number_id,
+          voice
         );
         return ok(
           `Call initiated!\n  From: ${result.fromNumber}\n  To: ${result.toNumber}\n  Call ID: ${result.id}\n  Status: ${result.status}`
@@ -390,23 +545,20 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "make_conversation_call",
-    "Place a phone call where the AI has an autonomous conversation about a given topic. " +
-      "Unlike make_call (which forwards to a webhook), this uses a built-in LLM so the AI " +
-      "can hold a full conversation without any webhook setup. " +
-      "By default, this blocks until the call finishes and returns the full transcript — " +
-      "one tool call does everything. Set wait=false if you want fire-and-forget. " +
-      "The agent must have a phone number attached — use list_agents to check.",
+    "Place a phone call where the AI has an autonomous conversation about a given topic.\n\n" +
+      "USE THIS TOOL WHEN the user wants an AI agent to call someone and have a conversation — " +
+      "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n" +
+      "DO NOT USE when the user wants a webhook-driven call (use make_call instead).\n\n" +
+      "The agent must have a phone number attached. Use list_agents to check.\n" +
+      "By default this blocks until the call finishes and returns the full transcript. " +
+      "Set wait=false for fire-and-forget.",
     {
       agent_id: z
         .string()
-        .describe(
-          "The agent ID (must have a phone number attached)"
-        ),
+        .describe("The agent ID (must have a phone number attached)"),
       to_number: z
         .string()
-        .describe(
-          "Recipient phone number in E.164 format (e.g. +14155551234)"
-        ),
+        .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
       topic: z.string().describe(
         "The conversation topic or instructions. This becomes the AI's system prompt. " +
           "Be specific about what the AI should discuss, its personality, and any goals."
@@ -414,26 +566,31 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       initial_greeting: z
         .string()
         .optional()
-        .describe(
-          "What the AI says when the call connects. If not set, the AI will generate one from the topic."
-        ),
+        .describe("What the AI says when the call connects. If not set, the AI will generate one from the topic."),
       wait: z
         .boolean()
         .default(true)
-        .describe(
-          "When true (default), blocks until the call ends and returns the full transcript inline. " +
-            "Set to false to return immediately after the call is initiated."
-        ),
+        .describe("When true (default), blocks until the call ends and returns the full transcript."),
       max_wait_seconds: z
         .number()
         .min(10)
         .max(600)
         .default(300)
-        .describe(
-          "Maximum seconds to wait for the call to complete. Defaults to 300 (5 minutes)."
-        ),
+        .describe("Maximum seconds to wait for the call to complete. Defaults to 300 (5 minutes)."),
+      from_number_id: z
+        .string()
+        .optional()
+        .describe("Specific phone number ID to call from (if agent has multiple numbers)"),
+      voice: z
+        .string()
+        .optional()
+        .describe("Voice ID override for this call (use list_voices to see options)"),
     },
-    async ({ agent_id, to_number, topic, initial_greeting, wait, max_wait_seconds }) => {
+    { openWorldHint: true },
+    async ({ agent_id, to_number, topic, initial_greeting, wait, max_wait_seconds, from_number_id, voice }) => {
+      const phoneErr = validateE164(to_number);
+      if (phoneErr) return err(new Error(phoneErr));
+
       try {
         const result = await api.makeConversationCall(
           agent_id,
@@ -441,7 +598,9 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           topic,
           initial_greeting,
           wait,
-          max_wait_seconds
+          max_wait_seconds,
+          from_number_id,
+          voice
         );
 
         if (wait && result.transcripts && result.transcripts.length > 0) {
@@ -504,6 +663,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(20)
         .describe("Max results to return"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ limit }) => {
       try {
         const result = await api.listAgents(limit);
@@ -516,10 +676,10 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "create_agent",
-    "Create a new agent. An agent owns phone numbers and handles calls/SMS. " +
-      "After creating, use buy_number or attach_number to give it a phone number. " +
+    "Create a new agent. An agent owns phone numbers and handles calls/SMS.\n\n" +
+      "After creating, use buy_number or attach_number to give it a phone number.\n" +
       "Set voice_mode to 'hosted' with a system_prompt for autonomous AI voice calls, " +
-      "or 'webhook' (default) to forward call transcripts to your webhook URL. " +
+      "or 'webhook' (default) to forward call transcripts to your webhook URL.\n" +
       "Use list_voices to see available voice options.",
     {
       name: z
@@ -532,36 +692,35 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       voice_mode: z
         .enum(["webhook", "hosted"])
         .optional()
-        .describe(
-          "'webhook' (default) forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."
-        ),
+        .describe("'webhook' (default) forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."),
       system_prompt: z
         .string()
         .optional()
-        .describe(
-          "Required when voice_mode is 'hosted'. The AI's personality and instructions for voice calls."
-        ),
+        .describe("Required when voice_mode is 'hosted'. The AI's personality and instructions for voice calls."),
       begin_message: z
         .string()
         .optional()
-        .describe(
-          "What the AI says when a call connects. Only used in 'hosted' mode."
-        ),
+        .describe("What the AI says when a call connects. Only used in 'hosted' mode."),
       voice: z
         .string()
         .optional()
-        .describe(
-          "Voice ID for the agent (use list_voices to see options). Defaults to '11labs-Brian'."
-        ),
+        .describe("Voice ID for the agent (use list_voices to see options). Defaults to '11labs-Brian'."),
+      transfer_number: z
+        .string()
+        .optional()
+        .describe("Phone number to transfer calls to (E.164 format). Enables call transfer during conversations."),
+      voicemail_message: z
+        .string()
+        .optional()
+        .describe("Voicemail greeting text. When set, unanswered calls hear this message and can leave a voicemail."),
     },
-    async ({
-      name,
-      description,
-      voice_mode,
-      system_prompt,
-      begin_message,
-      voice,
-    }) => {
+    {},
+    async ({ name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+      if (transfer_number) {
+        const phoneErr = validateE164(transfer_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+
       try {
         const result = await api.createAgent({
           name,
@@ -570,6 +729,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           systemPrompt: system_prompt,
           beginMessage: begin_message,
           voice,
+          transferNumber: transfer_number,
+          voicemailMessage: voicemail_message,
         });
         return ok(
           `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n\n${JSON.stringify(result, null, 2)}`
@@ -582,9 +743,9 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "update_agent",
-    "Update an agent's configuration — name, description, voice settings, system prompt, or greeting. " +
-      "Only provided fields are updated. Use list_voices to see available voice IDs. " +
-      "Switching voice_mode to 'hosted' requires a system_prompt.",
+    "Update an agent's configuration — name, description, voice settings, system prompt, greeting, " +
+      "call transfer, or voicemail. Only provided fields are updated.\n" +
+      "Use list_voices to see available voice IDs. Switching voice_mode to 'hosted' requires a system_prompt.",
     {
       agent_id: z.string().describe("The agent ID to update"),
       name: z.string().optional().describe("New name for the agent"),
@@ -592,35 +753,35 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       voice_mode: z
         .enum(["webhook", "hosted"])
         .optional()
-        .describe(
-          "'webhook' forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."
-        ),
+        .describe("'webhook' forwards transcripts to your webhook. 'hosted' uses built-in AI with system_prompt."),
       system_prompt: z
         .string()
         .optional()
-        .describe(
-          "The AI's personality and instructions. Required when voice_mode is 'hosted'."
-        ),
+        .describe("The AI's personality and instructions. Required when voice_mode is 'hosted'."),
       begin_message: z
         .string()
         .optional()
-        .describe(
-          "What the AI says when a call connects (hosted mode only)."
-        ),
+        .describe("What the AI says when a call connects (hosted mode only)."),
       voice: z
         .string()
         .optional()
         .describe("Voice ID (use list_voices to see options)."),
+      transfer_number: z
+        .string()
+        .optional()
+        .describe("Phone number to transfer calls to (E.164 format), or empty string to remove."),
+      voicemail_message: z
+        .string()
+        .optional()
+        .describe("Voicemail greeting text, or empty string to disable voicemail."),
     },
-    async ({
-      agent_id,
-      name,
-      description,
-      voice_mode,
-      system_prompt,
-      begin_message,
-      voice,
-    }) => {
+    { idempotentHint: true },
+    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+      if (transfer_number) {
+        const phoneErr = validateE164(transfer_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+
       try {
         const params: Record<string, string | undefined> = {};
         if (name !== undefined) params.name = name;
@@ -629,6 +790,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (system_prompt !== undefined) params.systemPrompt = system_prompt;
         if (begin_message !== undefined) params.beginMessage = begin_message;
         if (voice !== undefined) params.voice = voice;
+        if (transfer_number !== undefined) params.transferNumber = transfer_number;
+        if (voicemail_message !== undefined) params.voicemailMessage = voicemail_message;
 
         const result = await api.updateAgent(agent_id, params);
         return ok(
@@ -642,10 +805,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "delete_agent",
-    "Delete an agent. Phone numbers attached to it will be kept but unassigned. This cannot be undone.",
+    "Delete an agent permanently. Phone numbers attached to it will be kept but unassigned.\n\n" +
+      "DO NOT USE without confirming with the user — this cannot be undone.",
     {
       agent_id: z.string().describe("The agent ID to delete"),
     },
+    { destructiveHint: true },
     async ({ agent_id }) => {
       try {
         const result = await api.deleteAgent(agent_id);
@@ -662,6 +827,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     {
       agent_id: z.string().describe("The agent ID"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id }) => {
       try {
         const result = await api.getAgent(agent_id);
@@ -680,6 +846,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       agent_id: z.string().describe("The agent ID"),
       number_id: z.string().describe("The phone number ID to attach"),
     },
+    { idempotentHint: true },
     async ({ agent_id, number_id }) => {
       try {
         const result = await api.attachNumber(agent_id, number_id);
@@ -693,9 +860,29 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   server.tool(
+    "detach_number",
+    "Detach a phone number from an agent. The number is kept in your account but becomes unassigned. " +
+      "Use list_agents or get_agent to see which numbers are attached.",
+    {
+      agent_id: z.string().describe("The agent ID that currently owns the number"),
+      number_id: z.string().describe("The phone number ID to detach"),
+    },
+    { idempotentHint: true },
+    async ({ agent_id, number_id }) => {
+      try {
+        await api.detachNumber(agent_id, number_id);
+        return ok(`Detached number ${number_id} from agent ${agent_id}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
     "list_voices",
     "List available voices for agents. Use the voice_id value when calling create_agent or update_agent.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       try {
         const result = await api.listVoices();
@@ -720,6 +907,84 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   // ============================================================
+  // Agent-scoped queries
+  // ============================================================
+
+  server.tool(
+    "list_agent_conversations",
+    "List SMS conversations for a specific agent. Useful when you have multiple agents and want to see " +
+      "conversations handled by one of them. Use list_agents to find agent IDs.",
+    {
+      agent_id: z.string().describe("The agent ID"),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe("Max results to return"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ agent_id, limit }) => {
+      try {
+        const result = await api.listAgentConversations(agent_id, limit);
+        if (result.data.length === 0) {
+          return ok("No conversations found for this agent.");
+        }
+
+        const formatted = result.data
+          .map(
+            (c) =>
+              `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"}) id=${c.id}`
+          )
+          .join("\n");
+
+        return ok(
+          `${result.data.length} conversation(s):\n\n${formatted}\n\nTotal: ${result.total}`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "list_agent_calls",
+    "List calls for a specific agent. Useful when you have multiple agents and want to see " +
+      "calls handled by one of them. Use list_agents to find agent IDs.",
+    {
+      agent_id: z.string().describe("The agent ID"),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe("Max results to return"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ agent_id, limit }) => {
+      try {
+        const result = await api.listAgentCalls(agent_id, limit);
+        if (result.data.length === 0) {
+          return ok("No calls found for this agent.");
+        }
+
+        const formatted = result.data
+          .map(
+            (c) =>
+              `[${c.startedAt}] ${c.direction} ${c.fromNumber} → ${c.toNumber} (${c.status}) id=${c.id}`
+          )
+          .join("\n");
+
+        return ok(
+          `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  // ============================================================
   // Conversations
   // ============================================================
 
@@ -735,6 +1000,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(20)
         .describe("Max results to return"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ limit }) => {
       try {
         const result = await api.listConversations(limit);
@@ -770,6 +1036,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .default(50)
         .describe("Max messages to include"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ conversation_id, message_limit }) => {
       try {
         const result = await api.getConversation(
@@ -790,8 +1057,35 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
             `Contact: ${result.participant}`,
             `Number: ${result.phoneNumber}`,
             `Messages: ${result.messageCount}`,
+            result.metadata ? `Metadata: ${JSON.stringify(result.metadata)}` : null,
             `\n${messages}`,
-          ].join("\n")
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "update_conversation",
+    "Set metadata on a conversation. Use this to store custom state, tags, or context " +
+      "that persists between messages. Pass null to clear metadata.",
+    {
+      conversation_id: z.string().describe("The conversation ID"),
+      metadata: z
+        .record(z.unknown())
+        .nullable()
+        .describe("JSON metadata object to store on the conversation, or null to clear"),
+    },
+    { idempotentHint: true },
+    async ({ conversation_id, metadata }) => {
+      try {
+        const result = await api.updateConversation(conversation_id, metadata);
+        return ok(
+          `Conversation updated.\n  ID: ${result.id}\n  Metadata: ${JSON.stringify(result.metadata)}`
         );
       } catch (e) {
         return err(e);
@@ -808,6 +1102,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     "Get account usage statistics: plan limits, phone number quotas, message/call volume, " +
       "and webhook delivery stats. Use this to check remaining capacity before provisioning resources.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       try {
         const result = await api.getUsage();
@@ -847,6 +1142,70 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     }
   );
 
+  server.tool(
+    "get_daily_usage",
+    "Get daily usage breakdown for the last N days. Shows messages, calls, and voice minutes per day.",
+    {
+      days: z
+        .number()
+        .min(1)
+        .max(365)
+        .default(30)
+        .describe("Number of days to look back (default 30)"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ days }) => {
+      try {
+        const result = await api.getDailyUsage(days);
+        if (result.data.length === 0) {
+          return ok("No usage data for this period.");
+        }
+
+        const formatted = result.data
+          .map(
+            (d) => `${d.date}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+          )
+          .join("\n");
+
+        return ok(`Daily usage (last ${days} days):\n\n${formatted}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "get_monthly_usage",
+    "Get monthly usage breakdown. Shows messages, calls, and voice minutes per month.",
+    {
+      months: z
+        .number()
+        .min(1)
+        .max(24)
+        .default(12)
+        .describe("Number of months to look back (default 12)"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ months }) => {
+      try {
+        const result = await api.getMonthlyUsage(months);
+        if (result.data.length === 0) {
+          return ok("No usage data for this period.");
+        }
+
+        const formatted = result.data
+          .map(
+            (d) => `${d.month}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+          )
+          .join("\n");
+
+        return ok(`Monthly usage (last ${months} months):\n\n${formatted}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
   // ============================================================
   // Webhooks (project-level)
   // ============================================================
@@ -856,6 +1215,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     "Get the project-level webhook endpoint that receives inbound messages and call events. " +
       "For agent-specific webhooks, use get_agent_webhook.",
     {},
+    { readOnlyHint: true, idempotentHint: true },
     async () => {
       try {
         const result = await api.getWebhook();
@@ -871,8 +1231,9 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "set_webhook",
-    "Set the project-level webhook URL that receives inbound messages and call events for all agents. " +
-      "To route a specific agent's events to a different URL, use set_agent_webhook instead. " +
+    "Set the project-level webhook URL that receives inbound messages and call events for all agents.\n\n" +
+      "To route a specific agent's events to a different URL, use set_agent_webhook instead " +
+      "(agent-level webhooks take priority over project-level).\n" +
       "The webhook secret is returned — use it to verify webhook signatures.",
     {
       url: z
@@ -884,13 +1245,16 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .min(0)
         .max(50)
         .optional()
-        .describe(
-          "Number of recent messages to include as conversation context in each webhook (0-50)"
-        ),
+        .describe("Number of recent messages to include as conversation context in each webhook (0-50)"),
+      timeout: z
+        .number()
+        .optional()
+        .describe("Webhook response timeout in seconds"),
     },
-    async ({ url, context_limit }) => {
+    { idempotentHint: true },
+    async ({ url, context_limit, timeout }) => {
       try {
-        const result = await api.setWebhook(url, context_limit);
+        const result = await api.setWebhook(url, context_limit, timeout);
         return ok(
           `Webhook set!\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
         );
@@ -902,12 +1266,85 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "delete_webhook",
-    "Remove the project-level webhook. Agents with their own webhook (set via set_agent_webhook) are not affected.",
+    "Remove the project-level webhook. Agents with their own webhook (set via set_agent_webhook) are not affected.\n\n" +
+      "DO NOT USE without confirming with the user — this stops all project-level event delivery.",
     {},
+    { destructiveHint: true },
     async () => {
       try {
         await api.deleteWebhook();
         return ok("Webhook deleted.");
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "test_webhook",
+    "Send a test event to the project-level webhook to verify it's working. " +
+      "Returns the HTTP status code and response time. " +
+      "Optionally pass an agent_id to simulate an agent-specific event.",
+    {
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Optional agent ID to simulate an event from this agent"),
+    },
+    { idempotentHint: true, openWorldHint: true },
+    async ({ agent_id }) => {
+      try {
+        const result = await api.testWebhook(agent_id);
+        if (result.success) {
+          return ok(
+            `Webhook test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`
+          );
+        }
+        return ok(
+          `Webhook test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "list_webhook_deliveries",
+    "View recent webhook delivery history for the project-level webhook. " +
+      "Shows which events were delivered, their HTTP status codes, and timing. " +
+      "Use this to debug failed deliveries.",
+    {
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe("Max results to return"),
+      hours: z
+        .number()
+        .min(1)
+        .optional()
+        .describe("Only show deliveries from the last N hours"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ limit, hours }) => {
+      try {
+        const result = await api.listWebhookDeliveries(limit, hours);
+        if (result.data.length === 0) {
+          return ok("No webhook deliveries found.");
+        }
+
+        const formatted = result.data
+          .map(
+            (d) =>
+              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
+          )
+          .join("\n");
+
+        return ok(
+          `${result.data.length} delivery(ies):\n\n${formatted}\n\nTotal: ${result.total}`
+        );
       } catch (e) {
         return err(e);
       }
@@ -925,6 +1362,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     {
       agent_id: z.string().describe("The agent ID"),
     },
+    { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id }) => {
       try {
         const result = await api.getAgentWebhook(agent_id);
@@ -943,7 +1381,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   server.tool(
     "set_agent_webhook",
     "Set a webhook URL for a specific agent. When configured, this agent's inbound messages " +
-      "and call events are delivered here instead of the project-level webhook. " +
+      "and call events are delivered here instead of the project-level webhook.\n\n" +
+      "Agent-level webhooks take priority over project-level. " +
       "Useful when different agents need different backends.",
     {
       agent_id: z.string().describe("The agent ID"),
@@ -956,16 +1395,20 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .min(0)
         .max(50)
         .optional()
-        .describe(
-          "Number of recent messages to include as conversation context (0-50)"
-        ),
+        .describe("Number of recent messages to include as conversation context (0-50)"),
+      timeout: z
+        .number()
+        .optional()
+        .describe("Webhook response timeout in seconds"),
     },
-    async ({ agent_id, url, context_limit }) => {
+    { idempotentHint: true },
+    async ({ agent_id, url, context_limit, timeout }) => {
       try {
         const result = await api.setAgentWebhook(
           agent_id,
           url,
-          context_limit
+          context_limit,
+          timeout
         );
         return ok(
           `Agent webhook set!\n  Agent: ${agent_id}\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
@@ -978,15 +1421,84 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "delete_agent_webhook",
-    "Remove the webhook for a specific agent. Events will fall back to the project-level webhook.",
+    "Remove the webhook for a specific agent. Events will fall back to the project-level webhook.\n\n" +
+      "DO NOT USE without confirming with the user.",
     {
       agent_id: z.string().describe("The agent ID"),
     },
+    { destructiveHint: true },
     async ({ agent_id }) => {
       try {
         await api.deleteAgentWebhook(agent_id);
         return ok(
           "Agent webhook deleted. Events will now go to the project-level webhook."
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "test_agent_webhook",
+    "Send a test event to an agent's webhook to verify it's working. " +
+      "Returns the HTTP status code and response time.",
+    {
+      agent_id: z.string().describe("The agent ID"),
+    },
+    { idempotentHint: true, openWorldHint: true },
+    async ({ agent_id }) => {
+      try {
+        const result = await api.testAgentWebhook(agent_id);
+        if (result.success) {
+          return ok(
+            `Agent webhook test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`
+          );
+        }
+        return ok(
+          `Agent webhook test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "list_agent_webhook_deliveries",
+    "View recent webhook delivery history for a specific agent's webhook. " +
+      "Use this to debug failed deliveries for one agent.",
+    {
+      agent_id: z.string().describe("The agent ID"),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(20)
+        .describe("Max results to return"),
+      hours: z
+        .number()
+        .min(1)
+        .optional()
+        .describe("Only show deliveries from the last N hours"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ agent_id, limit, hours }) => {
+      try {
+        const result = await api.listAgentWebhookDeliveries(agent_id, limit, hours);
+        if (result.data.length === 0) {
+          return ok("No webhook deliveries found for this agent.");
+        }
+
+        const formatted = result.data
+          .map(
+            (d) =>
+              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
+          )
+          .join("\n");
+
+        return ok(
+          `${result.data.length} delivery(ies):\n\n${formatted}\n\nTotal: ${result.total}`
         );
       } catch (e) {
         return err(e);
