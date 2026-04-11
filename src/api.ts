@@ -43,7 +43,7 @@ export class AgentPhoneAPI {
         let detail = text;
         try {
           const json = JSON.parse(text);
-          detail = json.detail || json.message || text;
+          detail = json.detail ?? json.message ?? text;
         } catch {
           // use raw text
         }
@@ -470,12 +470,8 @@ export class AgentPhoneAPI {
     fromNumberId?: string,
     voice?: string
   ) {
-    const body: Record<string, unknown> = {
-      agentId,
-      toNumber,
-      systemPrompt,
-      initialGreeting,
-    };
+    const body: Record<string, unknown> = { agentId, toNumber, systemPrompt };
+    if (initialGreeting !== undefined) body.initialGreeting = initialGreeting;
     if (waitForCompletion !== undefined) body.waitForCompletion = waitForCompletion;
     if (maxWaitSeconds !== undefined) body.maxWaitSeconds = maxWaitSeconds;
     if (fromNumberId !== undefined) body.fromNumberId = fromNumberId;

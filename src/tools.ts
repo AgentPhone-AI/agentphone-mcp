@@ -222,7 +222,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .optional()
         .describe("Agent ID to attach this number to immediately"),
     },
-    {},
+    { openWorldHint: true },
     async ({ country, area_code, agent_id }) => {
       const countryErr = validateCountry(country);
       if (countryErr) return err(new Error(countryErr));
@@ -253,7 +253,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .describe("The ID of the phone number to release"),
     },
-    { destructiveHint: true },
+    { destructiveHint: true, openWorldHint: true },
     async ({ number_id }) => {
       try {
         const result = await api.releaseNumber(number_id);
