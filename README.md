@@ -108,76 +108,65 @@ Once configured, just ask your AI agent things like:
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
 
-## All Tools (34)
+## All Tools (26)
 
 ### Account
 
 | Tool | Description |
 |------|-------------|
-| `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage. Call this first to orient yourself. |
-| `get_usage` | Get usage stats, plan limits, and quotas. Supports `breakdown` param for daily or monthly time-series data. |
+| `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage |
+| `get_usage` | Get usage stats, plan limits, and quotas. Use `breakdown` for daily or monthly time-series. |
 
 ### Phone Numbers
 
 | Tool | Description |
 |------|-------------|
 | `list_numbers` | List all phone numbers in your account |
-| `buy_number` | Purchase a new phone number. Supports `area_code` (e.g. `415`) and optional `agent_id` to attach immediately. |
+| `buy_number` | Purchase a new phone number with optional `area_code` and `agent_id` |
 
 ### SMS
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send an SMS/iMessage from one of your agent's numbers |
-| `get_messages` | Get SMS messages for a specific number |
-| `list_conversations` | List SMS conversation threads across all numbers |
+| `send_message` | Send an SMS from one of your agent's numbers |
+| `get_messages` | Get messages for a specific number |
+| `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
-| `update_conversation` | Set metadata on a conversation for storing custom state |
+| `update_conversation` | Set metadata on a conversation |
 
 ### Voice Calls
 
 | Tool | Description |
 |------|-------------|
-| `list_calls` | List recent calls across all numbers (filterable by status, direction, keyword) |
-| `list_calls_for_number` | List calls for a specific phone number |
+| `list_calls` | List calls. Filter by `agent_id`, `number_id`, status, direction, or keyword. |
 | `get_call` | Get call details and transcript |
-| `make_call` | Place an outbound call (uses your webhook for conversation) |
-| `make_conversation_call` | Place a call with built-in AI — no webhook needed, just provide a topic |
+| `make_call` | Place an outbound call (webhook-driven) |
+| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed |
 
 ### Agents
 
 | Tool | Description |
 |------|-------------|
 | `list_agents` | List all agents with their numbers and voice config |
-| `create_agent` | Create a new agent with voice mode, system prompt, voice, call transfer, and voicemail |
-| `update_agent` | Update an agent's configuration (all fields optional) |
+| `create_agent` | Create a new agent with voice, system prompt, call transfer, and voicemail |
+| `update_agent` | Update an agent's configuration |
 | `delete_agent` | Delete an agent (numbers are kept but unassigned) |
-| `get_agent` | Get agent details including phone numbers and voice configuration |
+| `get_agent` | Get agent details including phone numbers and voice config |
 | `attach_number` | Assign a phone number to an agent |
-| `detach_number` | Remove a phone number from an agent (number stays in your account) |
+| `detach_number` | Remove a phone number from an agent |
 | `list_voices` | List available voices for agents |
-| `list_agent_conversations` | List SMS conversations for a specific agent |
-| `list_agent_calls` | List calls for a specific agent |
 
-### Webhooks (project-level)
+### Webhooks
+
+All webhook tools accept an optional `agent_id` — pass it to manage an agent-specific webhook, omit it for the project-level default. Agent webhooks take priority over project-level.
 
 | Tool | Description |
 |------|-------------|
-| `get_webhook` | Get the project-level webhook configuration |
+| `get_webhook` | Get webhook configuration |
 | `set_webhook` | Set a webhook URL for inbound messages and call events |
-| `delete_webhook` | Remove the project-level webhook |
-| `test_webhook` | Send a test event to verify your webhook is working |
-| `list_webhook_deliveries` | View webhook delivery history for debugging |
-
-### Webhooks (per-agent)
-
-| Tool | Description |
-|------|-------------|
-| `get_agent_webhook` | Get the webhook for a specific agent |
-| `set_agent_webhook` | Set a webhook URL for a specific agent (overrides project default) |
-| `delete_agent_webhook` | Remove an agent's webhook (falls back to project default) |
-| `test_agent_webhook` | Send a test event to an agent's webhook |
-| `list_agent_webhook_deliveries` | View delivery history for an agent's webhook |
+| `delete_webhook` | Remove a webhook |
+| `test_webhook` | Send a test event to verify your webhook works |
+| `list_webhook_deliveries` | View delivery history for debugging |
 
 ## Environment Variables
 

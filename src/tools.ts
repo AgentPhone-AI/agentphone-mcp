@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 37 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 26 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -332,9 +332,17 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_calls",
-    "List recent phone calls across all numbers. Use get_call with a call ID to fetch the full transcript. " +
-      "Filter by status, direction, or search keyword.",
+    "List recent calls. Optionally filter by agent_id, number_id, status, direction, or keyword.\n\n" +
+      "Returns call IDs — use get_call with an ID to fetch the full transcript.",
     {
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Filter to calls for a specific agent"),
+      number_id: z
+        .string()
+        .optional()
+        .describe("Filter to calls for a specific phone number"),
       limit: z
         .number()
         .min(1)
@@ -344,9 +352,9 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       status: z
         .string()
         .optional()
-        .describe("Filter by call status (e.g. 'completed', 'failed', 'in-progress')"),
+        .describe("Filter by status: ringing, in-progress, completed, failed, busy, no-answer"),
       direction: z
-        .string()
+        .enum(["inbound", "outbound"])
         .optional()
         .describe("Filter by direction: 'inbound' or 'outbound'"),
       search: z
@@ -355,9 +363,17 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe("Search by phone number or keyword"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit, status, direction, search }) => {
+    async ({ agent_id, number_id, limit, status, direction, search }) => {
       try {
-        const result = await api.listCalls(limit, 0, { status, direction, search });
+        let result;
+        if (number_id) {
+          result = await api.listCallsForNumber(number_id, limit);
+        } else if (agent_id) {
+          result = await api.listAgentCalls(agent_id, limit);
+        } else {
+          result = await api.listCalls(limit, 0, { status, direction, search });
+        }
+
         if (result.data.length === 0) {
           return ok("No calls found.");
         }
@@ -371,42 +387,6 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
         return ok(
           `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}\n\nUse get_call with the id= value to fetch transcript.`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "list_calls_for_number",
-    "List calls for a specific phone number. Use list_numbers to find the number ID.",
-    {
-      number_id: z.string().describe("The phone number ID"),
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe("Max results to return"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ number_id, limit }) => {
-      try {
-        const result = await api.listCallsForNumber(number_id, limit);
-        if (result.data.length === 0) {
-          return ok("No calls found for this number.");
-        }
-
-        const formatted = result.data
-          .map(
-            (c) =>
-              `[${c.startedAt}] ${c.direction} ${c.fromNumber} → ${c.toNumber} (${c.status}) id=${c.id}`
-          )
-          .join("\n");
-
-        return ok(
-          `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}`
         );
       } catch (e) {
         return err(e);
@@ -882,83 +862,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     }
   );
 
-  // ============================================================
-  // Agent-scoped queries
-  // ============================================================
 
-  server.tool(
-    "list_agent_conversations",
-    "List SMS conversations for a specific agent. Useful when you have multiple agents and want to see " +
-      "conversations handled by one of them. Use list_agents to find agent IDs.",
-    {
-      agent_id: z.string().describe("The agent ID"),
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe("Max results to return"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id, limit }) => {
-      try {
-        const result = await api.listAgentConversations(agent_id, limit);
-        if (result.data.length === 0) {
-          return ok("No conversations found for this agent.");
-        }
 
-        const formatted = result.data
-          .map(
-            (c) =>
-              `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"}) id=${c.id}`
-          )
-          .join("\n");
-
-        return ok(
-          `${result.data.length} conversation(s):\n\n${formatted}\n\nTotal: ${result.total}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "list_agent_calls",
-    "List calls for a specific agent. Useful when you have multiple agents and want to see " +
-      "calls handled by one of them. Use list_agents to find agent IDs.",
-    {
-      agent_id: z.string().describe("The agent ID"),
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe("Max results to return"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id, limit }) => {
-      try {
-        const result = await api.listAgentCalls(agent_id, limit);
-        if (result.data.length === 0) {
-          return ok("No calls found for this agent.");
-        }
-
-        const formatted = result.data
-          .map(
-            (c) =>
-              `[${c.startedAt}] ${c.direction} ${c.fromNumber} → ${c.toNumber} (${c.status}) id=${c.id}`
-          )
-          .join("\n");
-
-        return ok(
-          `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
 
   // ============================================================
   // Conversations
@@ -966,9 +871,14 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_conversations",
-    "List SMS conversations across all your numbers. Each conversation is a thread between " +
-      "your number and an external contact. Use get_conversation with the ID to read messages.",
+    "List SMS conversations. Optionally filter by agent_id to see conversations for a specific agent.\n\n" +
+      "Each conversation is a thread between your number and an external contact. " +
+      "Use get_conversation with the ID to read messages.",
     {
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Filter to conversations for a specific agent"),
       limit: z
         .number()
         .min(1)
@@ -977,9 +887,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe("Max results to return"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ agent_id, limit }) => {
       try {
-        const result = await api.listConversations(limit);
+        const result = agent_id
+          ? await api.listAgentConversations(agent_id, limit)
+          : await api.listConversations(limit);
+
         if (result.data.length === 0) {
           return ok("No conversations found.");
         }
@@ -1161,20 +1074,35 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   // ============================================================
-  // Webhooks (project-level)
+  // Webhooks (project-level and per-agent)
+  //
+  // Pass agent_id to scope to a specific agent's webhook.
+  // Omit agent_id to manage the project-level default webhook.
+  // Agent-level webhooks take priority over project-level.
   // ============================================================
 
   server.tool(
     "get_webhook",
-    "Get the project-level webhook endpoint that receives inbound messages and call events. " +
-      "For agent-specific webhooks, use get_agent_webhook.",
-    {},
+    "Get the webhook configuration. Pass agent_id to get an agent-specific webhook, " +
+      "or omit for the project-level default.",
+    {
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Agent ID to get that agent's webhook. Omit for project-level webhook."),
+    },
     { readOnlyHint: true, idempotentHint: true },
-    async () => {
+    async ({ agent_id }) => {
       try {
-        const result = await api.getWebhook();
+        const result = agent_id
+          ? await api.getAgentWebhook(agent_id)
+          : await api.getWebhook();
         if (!result) {
-          return ok("No webhook configured.");
+          return ok(
+            agent_id
+              ? "No agent-specific webhook configured. Events go to the project-level webhook."
+              : "No webhook configured."
+          );
         }
         return ok(JSON.stringify(result, null, 2));
       } catch (e) {
@@ -1185,165 +1113,19 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "set_webhook",
-    "Set the project-level webhook URL that receives inbound messages and call events for all agents.\n\n" +
-      "To route a specific agent's events to a different URL, use set_agent_webhook instead " +
-      "(agent-level webhooks take priority over project-level).\n" +
-      "The webhook secret is returned — use it to verify webhook signatures.",
+    "Set a webhook URL to receive inbound messages and call events.\n\n" +
+      "Pass agent_id to set a webhook for a specific agent (overrides project default). " +
+      "Omit agent_id to set the project-level webhook for all agents.\n" +
+      "The webhook secret is returned — use it to verify signatures.",
     {
       url: z
         .string()
         .url()
         .describe("The publicly accessible webhook URL (must be HTTPS in production)"),
-      context_limit: z
-        .number()
-        .min(0)
-        .max(50)
-        .optional()
-        .describe("Number of recent messages to include as conversation context in each webhook (0-50)"),
-      timeout: z
-        .number()
-        .optional()
-        .describe("Webhook response timeout in seconds"),
-    },
-    { idempotentHint: true },
-    async ({ url, context_limit, timeout }) => {
-      try {
-        const result = await api.setWebhook(url, context_limit, timeout);
-        return ok(
-          `Webhook set!\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "delete_webhook",
-    "Remove the project-level webhook. Agents with their own webhook (set via set_agent_webhook) are not affected.\n\n" +
-      "DO NOT USE without confirming with the user — this stops all project-level event delivery.",
-    {},
-    { destructiveHint: true },
-    async () => {
-      try {
-        await api.deleteWebhook();
-        return ok("Webhook deleted.");
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "test_webhook",
-    "Send a test event to the project-level webhook to verify it's working. " +
-      "Returns the HTTP status code and response time. " +
-      "Optionally pass an agent_id to simulate an agent-specific event.",
-    {
       agent_id: z
         .string()
         .optional()
-        .describe("Optional agent ID to simulate an event from this agent"),
-    },
-    { idempotentHint: true, openWorldHint: true },
-    async ({ agent_id }) => {
-      try {
-        const result = await api.testWebhook(agent_id);
-        if (result.success) {
-          return ok(
-            `Webhook test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`
-          );
-        }
-        return ok(
-          `Webhook test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "list_webhook_deliveries",
-    "View recent webhook delivery history for the project-level webhook. " +
-      "Shows which events were delivered, their HTTP status codes, and timing. " +
-      "Use this to debug failed deliveries.",
-    {
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(20)
-        .describe("Max results to return"),
-      hours: z
-        .number()
-        .min(1)
-        .optional()
-        .describe("Only show deliveries from the last N hours"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ limit, hours }) => {
-      try {
-        const result = await api.listWebhookDeliveries(limit, hours);
-        if (result.data.length === 0) {
-          return ok("No webhook deliveries found.");
-        }
-
-        const formatted = result.data
-          .map(
-            (d) =>
-              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
-          )
-          .join("\n");
-
-        return ok(
-          `${result.data.length} delivery(ies):\n\n${formatted}\n\nTotal: ${result.total}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  // ============================================================
-  // Webhooks (per-agent)
-  // ============================================================
-
-  server.tool(
-    "get_agent_webhook",
-    "Get the webhook configured for a specific agent. When set, this agent's events go here " +
-      "instead of the project-level webhook.",
-    {
-      agent_id: z.string().describe("The agent ID"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id }) => {
-      try {
-        const result = await api.getAgentWebhook(agent_id);
-        if (!result) {
-          return ok(
-            "No agent-specific webhook configured. Events go to the project-level webhook."
-          );
-        }
-        return ok(JSON.stringify(result, null, 2));
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "set_agent_webhook",
-    "Set a webhook URL for a specific agent. When configured, this agent's inbound messages " +
-      "and call events are delivered here instead of the project-level webhook.\n\n" +
-      "Agent-level webhooks take priority over project-level. " +
-      "Useful when different agents need different backends.",
-    {
-      agent_id: z.string().describe("The agent ID"),
-      url: z
-        .string()
-        .url()
-        .describe("The publicly accessible webhook URL (must be HTTPS in production)"),
+        .describe("Agent ID to set webhook for that agent only. Omit for project-level."),
       context_limit: z
         .number()
         .min(0)
@@ -1356,16 +1138,14 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe("Webhook response timeout in seconds"),
     },
     { idempotentHint: true },
-    async ({ agent_id, url, context_limit, timeout }) => {
+    async ({ url, agent_id, context_limit, timeout }) => {
       try {
-        const result = await api.setAgentWebhook(
-          agent_id,
-          url,
-          context_limit,
-          timeout
-        );
+        const result = agent_id
+          ? await api.setAgentWebhook(agent_id, url, context_limit, timeout)
+          : await api.setWebhook(url, context_limit, timeout);
+        const scope = agent_id ? `Agent ${agent_id}` : "Project";
         return ok(
-          `Agent webhook set!\n  Agent: ${agent_id}\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
+          `${scope} webhook set!\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
         );
       } catch (e) {
         return err(e);
@@ -1374,19 +1154,25 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   server.tool(
-    "delete_agent_webhook",
-    "Remove the webhook for a specific agent. Events will fall back to the project-level webhook.\n\n" +
+    "delete_webhook",
+    "Remove a webhook. Pass agent_id to remove an agent's webhook (falls back to project default). " +
+      "Omit agent_id to remove the project-level webhook.\n\n" +
       "DO NOT USE without confirming with the user.",
     {
-      agent_id: z.string().describe("The agent ID"),
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Agent ID to delete that agent's webhook. Omit for project-level."),
     },
     { destructiveHint: true },
     async ({ agent_id }) => {
       try {
-        await api.deleteAgentWebhook(agent_id);
-        return ok(
-          "Agent webhook deleted. Events will now go to the project-level webhook."
-        );
+        if (agent_id) {
+          await api.deleteAgentWebhook(agent_id);
+          return ok("Agent webhook deleted. Events will now go to the project-level webhook.");
+        }
+        await api.deleteWebhook();
+        return ok("Project webhook deleted.");
       } catch (e) {
         return err(e);
       }
@@ -1394,23 +1180,29 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   server.tool(
-    "test_agent_webhook",
-    "Send a test event to an agent's webhook to verify it's working. " +
-      "Returns the HTTP status code and response time.",
+    "test_webhook",
+    "Send a test event to verify a webhook is working. Returns the HTTP status code and response time.\n\n" +
+      "Pass agent_id to test that agent's webhook. Omit to test the project-level webhook.",
     {
-      agent_id: z.string().describe("The agent ID"),
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Agent ID to test that agent's webhook. Omit for project-level."),
     },
     { idempotentHint: true, openWorldHint: true },
     async ({ agent_id }) => {
       try {
-        const result = await api.testAgentWebhook(agent_id);
+        const result = agent_id
+          ? await api.testAgentWebhook(agent_id)
+          : await api.testWebhook();
+        const scope = agent_id ? "Agent webhook" : "Webhook";
         if (result.success) {
           return ok(
-            `Agent webhook test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`
+            `${scope} test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`
           );
         }
         return ok(
-          `Agent webhook test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`
+          `${scope} test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`
         );
       } catch (e) {
         return err(e);
@@ -1419,11 +1211,14 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   server.tool(
-    "list_agent_webhook_deliveries",
-    "View recent webhook delivery history for a specific agent's webhook. " +
-      "Use this to debug failed deliveries for one agent.",
+    "list_webhook_deliveries",
+    "View recent webhook delivery history. Shows which events were delivered, HTTP status codes, and timing.\n\n" +
+      "Pass agent_id to see deliveries for that agent's webhook. Omit for project-level.",
     {
-      agent_id: z.string().describe("The agent ID"),
+      agent_id: z
+        .string()
+        .optional()
+        .describe("Agent ID to see deliveries for that agent's webhook. Omit for project-level."),
       limit: z
         .number()
         .min(1)
@@ -1439,9 +1234,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, limit, hours }) => {
       try {
-        const result = await api.listAgentWebhookDeliveries(agent_id, limit, hours);
+        const result = agent_id
+          ? await api.listAgentWebhookDeliveries(agent_id, limit, hours)
+          : await api.listWebhookDeliveries(limit, hours);
+
         if (result.data.length === 0) {
-          return ok("No webhook deliveries found for this agent.");
+          return ok("No webhook deliveries found.");
         }
 
         const formatted = result.data
