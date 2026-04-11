@@ -242,30 +242,6 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     }
   );
 
-  server.tool(
-    "release_number",
-    "Release (delete) a phone number permanently. The number goes back to the carrier pool and cannot be recovered.\n\n" +
-      "USE THIS TOOL WHEN the user explicitly wants to remove a number they no longer need.\n" +
-      "DO NOT USE without confirming with the user — this is irreversible.\n\n" +
-      "Use list_numbers to find the number ID.",
-    {
-      number_id: z
-        .string()
-        .describe("The ID of the phone number to release"),
-    },
-    { destructiveHint: true, openWorldHint: true },
-    async ({ number_id }) => {
-      try {
-        const result = await api.releaseNumber(number_id);
-        return ok(
-          `Released number ${result.phoneNumber}\n\n${JSON.stringify(result, null, 2)}`
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
   // ============================================================
   // SMS / Messages
   // ============================================================
@@ -1099,14 +1075,57 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_usage",
-    "Get account usage statistics: plan limits, phone number quotas, message/call volume, " +
-      "and webhook delivery stats. Use this to check remaining capacity before provisioning resources.",
-    {},
+    "Get account usage statistics. By default returns a summary with plan limits, quotas, and " +
+      "message/call volume. Use breakdown='daily' or 'monthly' for time-series data.",
+    {
+      breakdown: z
+        .enum(["summary", "daily", "monthly"])
+        .default("summary")
+        .describe("'summary' for plan limits and totals, 'daily' for per-day breakdown, 'monthly' for per-month breakdown"),
+      days: z
+        .number()
+        .min(1)
+        .max(365)
+        .default(30)
+        .describe("Number of days to look back (only used with breakdown='daily')"),
+      months: z
+        .number()
+        .min(1)
+        .max(24)
+        .default(12)
+        .describe("Number of months to look back (only used with breakdown='monthly')"),
+    },
     { readOnlyHint: true, idempotentHint: true },
-    async () => {
+    async ({ breakdown, days, months }) => {
       try {
-        const result = await api.getUsage();
+        if (breakdown === "daily") {
+          const result = await api.getDailyUsage(days);
+          if (result.data.length === 0) {
+            return ok("No usage data for this period.");
+          }
+          const formatted = result.data
+            .map(
+              (d) => `${d.date}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+            )
+            .join("\n");
+          return ok(`Daily usage (last ${days} days):\n\n${formatted}`);
+        }
 
+        if (breakdown === "monthly") {
+          const result = await api.getMonthlyUsage(months);
+          if (result.data.length === 0) {
+            return ok("No usage data for this period.");
+          }
+          const formatted = result.data
+            .map(
+              (d) => `${d.month}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+            )
+            .join("\n");
+          return ok(`Monthly usage (last ${months} months):\n\n${formatted}`);
+        }
+
+        // Default: summary
+        const result = await api.getUsage();
         const lines = [
           `Plan: ${result.plan.name}`,
           ``,
@@ -1134,72 +1153,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           `  Max call duration: ${result.plan.limits.maxCallDurationMinutes} min`,
           `  Concurrent calls: ${result.plan.limits.concurrentCalls}`,
         ];
-
         return ok(lines.join("\n"));
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "get_daily_usage",
-    "Get daily usage breakdown for the last N days. Shows messages, calls, and voice minutes per day.",
-    {
-      days: z
-        .number()
-        .min(1)
-        .max(365)
-        .default(30)
-        .describe("Number of days to look back (default 30)"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ days }) => {
-      try {
-        const result = await api.getDailyUsage(days);
-        if (result.data.length === 0) {
-          return ok("No usage data for this period.");
-        }
-
-        const formatted = result.data
-          .map(
-            (d) => `${d.date}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
-          )
-          .join("\n");
-
-        return ok(`Daily usage (last ${days} days):\n\n${formatted}`);
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "get_monthly_usage",
-    "Get monthly usage breakdown. Shows messages, calls, and voice minutes per month.",
-    {
-      months: z
-        .number()
-        .min(1)
-        .max(24)
-        .default(12)
-        .describe("Number of months to look back (default 12)"),
-    },
-    { readOnlyHint: true, idempotentHint: true },
-    async ({ months }) => {
-      try {
-        const result = await api.getMonthlyUsage(months);
-        if (result.data.length === 0) {
-          return ok("No usage data for this period.");
-        }
-
-        const formatted = result.data
-          .map(
-            (d) => `${d.month}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
-          )
-          .join("\n");
-
-        return ok(`Monthly usage (last ${months} months):\n\n${formatted}`);
       } catch (e) {
         return err(e);
       }

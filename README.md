@@ -101,23 +101,21 @@ Once configured, just ask your AI agent things like:
 
 ## Highlights
 
-- **Phone numbers** — buy, list, and release numbers in any US/CA area code
+- **Phone numbers** — buy and manage numbers in any US/CA area code
 - **SMS** — send and receive text messages, view conversation threads
 - **Voice calls** — place outbound calls with built-in AI conversation (no webhook needed) or bring your own webhook
 - **Inbound handling** — set up webhooks to receive and respond to inbound calls and texts in real time
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
 
-## All Tools (37)
+## All Tools (34)
 
 ### Account
 
 | Tool | Description |
 |------|-------------|
 | `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage. Call this first to orient yourself. |
-| `get_usage` | Get detailed usage stats: plan limits, number quotas, message/call volume, webhook delivery stats. |
-| `get_daily_usage` | Get daily usage breakdown for the last N days. |
-| `get_monthly_usage` | Get monthly usage breakdown. |
+| `get_usage` | Get usage stats, plan limits, and quotas. Supports `breakdown` param for daily or monthly time-series data. |
 
 ### Phone Numbers
 
@@ -125,7 +123,6 @@ Once configured, just ask your AI agent things like:
 |------|-------------|
 | `list_numbers` | List all phone numbers in your account |
 | `buy_number` | Purchase a new phone number. Supports `area_code` (e.g. `415`) and optional `agent_id` to attach immediately. |
-| `release_number` | Release a phone number (irreversible) |
 
 ### SMS
 
