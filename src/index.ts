@@ -63,7 +63,7 @@ if (!httpMode && !API_KEY) {
 function createMcpServer(api: AgentPhoneAPI): McpServer {
   const server = new McpServer({
     name: "agentphone",
-    version: "0.3.0",
+    version: "0.4.0",
   });
   registerTools(server, api);
   return server;

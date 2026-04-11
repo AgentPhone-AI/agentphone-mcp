@@ -182,7 +182,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   server.tool(
     "list_numbers",
     "List all phone numbers in your account. Each number has an ID needed by other tools " +
-      "(get_messages, release_number, attach_number, list_calls_for_number).",
+      "(get_messages, attach_number, list_calls).",
     {
       limit: z
         .number()
@@ -332,7 +332,8 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_calls",
-    "List recent calls. Optionally filter by agent_id, number_id, status, direction, or keyword.\n\n" +
+    "List recent calls. Scope by agent_id or number_id, or use status/direction/search to filter globally.\n\n" +
+      "When agent_id or number_id is passed, status/direction/search filters are not applied.\n" +
       "Returns call IDs — use get_call with an ID to fetch the full transcript.",
     {
       agent_id: z
@@ -455,8 +456,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       "USE THIS TOOL WHEN the user wants to place a webhook-driven call where your backend " +
       "handles the conversation logic.\n" +
       "DO NOT USE when the user wants an autonomous AI conversation — use make_conversation_call instead.\n\n" +
-      "The agent must have a phone number attached and a webhook configured " +
-      "(set_webhook or set_agent_webhook).",
+      "The agent must have a phone number attached and a webhook configured (set_webhook).",
     {
       agent_id: z
         .string()
