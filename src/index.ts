@@ -14,17 +14,15 @@
  *   1. The Authorization header on each request (multi-tenant / hosted)
  *   2. The AGENTPHONE_API_KEY env var (single-tenant / self-hosted)
  *
- * Tools (37):
+ * Tools (26):
  *   Overview:  account_overview
- *   Numbers:   list_numbers, buy_number, release_number
+ *   Numbers:   list_numbers, buy_number
  *   SMS:       send_message, get_messages
- *   Calls:     list_calls, list_calls_for_number, get_call, make_call, make_conversation_call
+ *   Calls:     list_calls, get_call, make_call, make_conversation_call
  *   Agents:    list_agents, create_agent, update_agent, delete_agent, get_agent, attach_number, detach_number, list_voices
- *   Agent Q:   list_agent_conversations, list_agent_calls
  *   Convos:    list_conversations, get_conversation, update_conversation
- *   Usage:     get_usage, get_daily_usage, get_monthly_usage
+ *   Usage:     get_usage
  *   Webhooks:  get_webhook, set_webhook, delete_webhook, test_webhook, list_webhook_deliveries
- *   Agent WH:  get_agent_webhook, set_agent_webhook, delete_agent_webhook, test_agent_webhook, list_agent_webhook_deliveries
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -65,7 +63,7 @@ if (!httpMode && !API_KEY) {
 function createMcpServer(api: AgentPhoneAPI): McpServer {
   const server = new McpServer({
     name: "agentphone",
-    version: "0.3.0",
+    version: "0.4.0",
   });
   registerTools(server, api);
   return server;

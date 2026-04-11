@@ -4,6 +4,8 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 **AgentPhone** lets your AI agent buy phone numbers, send/receive SMS, and place voice calls — all through natural language in Cursor, Claude Desktop, or any MCP-compatible client.
 
+**Agents** are the core concept — each agent gets its own phone numbers, voice personality, system prompt, and webhook. Think of an agent as a virtual team member with its own phone line. You can create agents for different purposes (support, sales, scheduling) and configure how they sound and behave on calls.
+
 ## Quick Start
 
 ### 1. Get your API key
@@ -67,16 +69,13 @@ Then connect to `http://localhost:3000/mcp`.
 
 Once configured, just ask your AI agent things like:
 
-- *"Show me an overview of my account"*
 - *"Buy me a phone number in the 415 area code"*
-- *"Create a support agent with a hosted AI voice that greets callers and helps with billing"*
+- *"Create a support agent that greets callers and helps with billing"*
 - *"Call +14155551234 and have a conversation about scheduling a dentist appointment"*
 - *"Text +14155551234 saying 'Your appointment is confirmed for 3pm tomorrow'"*
 - *"Show me my recent calls and transcripts"*
 - *"List the available voices and switch my agent to a different one"*
-- *"Set up a webhook to receive inbound messages"*
-- *"Test my webhook to make sure it's working"*
-- *"How many numbers can I still provision?"*
+- *"Set up a webhook so I get notified when someone calls or texts my number"*
 - *"Show me this month's usage breakdown"*
 
 ## Transports
@@ -100,79 +99,74 @@ Once configured, just ask your AI agent things like:
 | `POST` | `/mcp` | MCP Streamable HTTP endpoint (stateless — each request is independent) |
 | `GET` | `/health` | Health check |
 
-## Available Tools (37)
+## Highlights
+
+- **Phone numbers** — buy and manage numbers in any US/CA area code
+- **SMS** — send and receive text messages, view conversation threads
+- **Voice calls** — place outbound calls with built-in AI conversation (no webhook needed) or bring your own webhook
+- **Inbound handling** — set up webhooks to receive and respond to inbound calls and texts in real time
+- **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
+- **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
+
+## All Tools (26)
 
 ### Account
 
 | Tool | Description |
 |------|-------------|
-| `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage. Call this first to orient yourself. |
-| `get_usage` | Get detailed usage stats: plan limits, number quotas, message/call volume, webhook delivery stats. |
-| `get_daily_usage` | Get daily usage breakdown for the last N days. |
-| `get_monthly_usage` | Get monthly usage breakdown. |
+| `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage |
+| `get_usage` | Get usage stats, plan limits, and quotas. Use `breakdown` for daily or monthly time-series. |
 
 ### Phone Numbers
 
 | Tool | Description |
 |------|-------------|
 | `list_numbers` | List all phone numbers in your account |
-| `buy_number` | Purchase a new phone number. Supports `area_code` (e.g. `415`) and optional `agent_id` to attach immediately. |
-| `release_number` | Release a phone number (irreversible) |
+| `buy_number` | Purchase a new phone number with optional `area_code` and `agent_id` |
 
 ### SMS
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send an SMS/iMessage from one of your agent's numbers |
-| `get_messages` | Get SMS messages for a specific number |
-| `list_conversations` | List SMS conversation threads across all numbers |
+| `send_message` | Send an SMS from one of your agent's numbers |
+| `get_messages` | Get messages for a specific number |
+| `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
-| `update_conversation` | Set metadata on a conversation for storing custom state |
+| `update_conversation` | Set metadata on a conversation |
 
 ### Voice Calls
 
 | Tool | Description |
 |------|-------------|
-| `list_calls` | List recent calls across all numbers (filterable by status, direction, keyword) |
-| `list_calls_for_number` | List calls for a specific phone number |
+| `list_calls` | List calls. Filter by `agent_id`, `number_id`, status, direction, or keyword. |
 | `get_call` | Get call details and transcript |
-| `make_call` | Place an outbound call (uses your webhook for conversation) |
-| `make_conversation_call` | Place a call with built-in AI — no webhook needed, just provide a topic |
+| `make_call` | Place an outbound call (webhook-driven) |
+| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed |
 
 ### Agents
 
 | Tool | Description |
 |------|-------------|
 | `list_agents` | List all agents with their numbers and voice config |
-| `create_agent` | Create a new agent with voice mode, system prompt, voice, call transfer, and voicemail |
-| `update_agent` | Update an agent's configuration (all fields optional) |
+| `create_agent` | Create a new agent with voice, system prompt, call transfer, and voicemail |
+| `update_agent` | Update an agent's configuration |
 | `delete_agent` | Delete an agent (numbers are kept but unassigned) |
-| `get_agent` | Get agent details including phone numbers and voice configuration |
+| `get_agent` | Get agent details including phone numbers and voice config |
 | `attach_number` | Assign a phone number to an agent |
-| `detach_number` | Remove a phone number from an agent (number stays in your account) |
+| `detach_number` | Remove a phone number from an agent |
 | `list_voices` | List available voices for agents |
-| `list_agent_conversations` | List SMS conversations for a specific agent |
-| `list_agent_calls` | List calls for a specific agent |
 
-### Webhooks (project-level)
+### Webhooks
+
+All webhook tools accept an optional `agent_id` — pass it to manage an agent-specific webhook, omit it for the project-level default. Agent webhooks take priority over project-level.
 
 | Tool | Description |
 |------|-------------|
-| `get_webhook` | Get the project-level webhook configuration |
+| `get_webhook` | Get webhook configuration |
 | `set_webhook` | Set a webhook URL for inbound messages and call events |
-| `delete_webhook` | Remove the project-level webhook |
-| `test_webhook` | Send a test event to verify your webhook is working |
-| `list_webhook_deliveries` | View webhook delivery history for debugging |
-
-### Webhooks (per-agent)
-
-| Tool | Description |
-|------|-------------|
-| `get_agent_webhook` | Get the webhook for a specific agent |
-| `set_agent_webhook` | Set a webhook URL for a specific agent (overrides project default) |
-| `delete_agent_webhook` | Remove an agent's webhook (falls back to project default) |
-| `test_agent_webhook` | Send a test event to an agent's webhook |
-| `list_agent_webhook_deliveries` | View delivery history for an agent's webhook |
+| `delete_webhook` | Remove a webhook |
+| `test_webhook` | Send a test event to verify your webhook works |
+| `list_webhook_deliveries` | View delivery history for debugging |
 
 ## Environment Variables
 
@@ -195,19 +189,15 @@ npm start       # Run compiled JS (stdio)
 
 ## How It Works
 
-This is an MCP (Model Context Protocol) server that connects your AI assistant to the [AgentPhone API](https://agentphone.to). It supports two transport modes:
+This MCP server connects your AI assistant to the [AgentPhone API](https://agentphone.to). Your assistant talks to the MCP server, which calls the AgentPhone API, which talks to the phone network.
 
-**stdio** — runs as a local process that your AI client communicates with over standard input/output:
 ```
-Your AI Assistant  <-->  agentphone-mcp (local)  <-->  AgentPhone API  <-->  Phone Network
-```
-
-**Streamable HTTP** — runs as an HTTP server that remote MCP clients connect to:
-```
-Remote MCP Client  -->  mcp.agentphone.to/mcp  <-->  AgentPhone API  <-->  Phone Network
+Your AI Assistant  <-->  agentphone-mcp  <-->  AgentPhone API  <-->  Phone Network
 ```
 
-The MCP server itself is stateless — it's a thin typed client that translates MCP tool calls into AgentPhone API requests. All state (numbers, calls, messages) lives on the AgentPhone platform.
+**Outbound**: your assistant places calls and sends texts through AgentPhone's API.
+
+**Inbound**: when someone calls or texts your number, AgentPhone sends a webhook event to your server — you can then respond programmatically or let your agent's built-in AI handle it.
 
 ## License
 
