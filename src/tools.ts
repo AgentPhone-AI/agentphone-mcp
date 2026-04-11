@@ -716,6 +716,11 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     },
     {},
     async ({ name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+      if (transfer_number) {
+        const phoneErr = validateE164(transfer_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+
       try {
         const result = await api.createAgent({
           name,
@@ -772,6 +777,11 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     },
     { idempotentHint: true },
     async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+      if (transfer_number) {
+        const phoneErr = validateE164(transfer_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+
       try {
         const params: Record<string, string | undefined> = {};
         if (name !== undefined) params.name = name;
@@ -1328,7 +1338,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         const formatted = result.data
           .map(
             (d) =>
-              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode || "N/A"}, ${d.responseMs || "N/A"}ms) id=${d.id}`
+              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
           )
           .join("\n");
 
@@ -1483,7 +1493,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         const formatted = result.data
           .map(
             (d) =>
-              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode || "N/A"}, ${d.responseMs || "N/A"}ms) id=${d.id}`
+              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
           )
           .join("\n");
 
