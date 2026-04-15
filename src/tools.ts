@@ -350,6 +350,11 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
       status: z
         .string()
         .optional()
@@ -364,15 +369,15 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe("Search by phone number or keyword"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id, number_id, limit, status, direction, search }) => {
+    async ({ agent_id, number_id, limit, offset, status, direction, search }) => {
       try {
         let result;
         if (number_id) {
-          result = await api.listCallsForNumber(number_id, limit);
+          result = await api.listCallsForNumber(number_id, limit, offset);
         } else if (agent_id) {
-          result = await api.listAgentCalls(agent_id, limit);
+          result = await api.listAgentCalls(agent_id, limit, offset);
         } else {
-          result = await api.listCalls(limit, 0, { status, direction, search });
+          result = await api.listCalls(limit, offset, { status, direction, search });
         }
 
         if (result.data.length === 0) {
@@ -488,7 +493,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           to_number,
           initial_greeting,
           from_number_id,
-          voice
+          voice,
         );
         return ok(
           `Call initiated!\n  From: ${result.fromNumber}\n  To: ${result.toNumber}\n  Call ID: ${result.id}\n  Status: ${result.status}`
@@ -885,13 +890,18 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id, limit }) => {
+    async ({ agent_id, limit, offset }) => {
       try {
         const result = agent_id
-          ? await api.listAgentConversations(agent_id, limit)
-          : await api.listConversations(limit);
+          ? await api.listAgentConversations(agent_id, limit, offset)
+          : await api.listConversations(limit, offset);
 
         if (result.data.length === 0) {
           return ok("No conversations found.");

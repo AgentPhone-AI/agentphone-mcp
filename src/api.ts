@@ -442,7 +442,7 @@ export class AgentPhoneAPI {
     toNumber: string,
     initialGreeting?: string,
     fromNumberId?: string,
-    voice?: string
+    voice?: string,
   ) {
     const body: Record<string, unknown> = { agentId, toNumber };
     if (initialGreeting !== undefined) body.initialGreeting = initialGreeting;
