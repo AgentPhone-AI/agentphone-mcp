@@ -665,7 +665,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("Voice ID for the agent (use list_voices to see options). Defaults to '11labs-Brian'."),
+        .describe("Voice ID for the agent (use list_voices to see options). Defaults to 'Skylar - Friendly Guide'."),
       transfer_number: z
         .string()
         .optional()
