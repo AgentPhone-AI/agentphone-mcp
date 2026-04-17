@@ -103,6 +103,51 @@ async function startStdio(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// MCP Server Card — static metadata for directory services (Smithery, etc.)
+// ---------------------------------------------------------------------------
+
+const serverCard = {
+  serverInfo: {
+    name: "agentphone",
+    version: "0.5.0",
+  },
+  authentication: {
+    required: true,
+    schemes: ["bearer"],
+  },
+  tools: [
+    { name: "account_overview", description: "Full snapshot of account: agents, numbers, webhook status, usage limits" },
+    { name: "get_usage", description: "Detailed usage stats with optional daily or monthly breakdown" },
+    { name: "list_numbers", description: "List all phone numbers in account" },
+    { name: "buy_number", description: "Purchase a new phone number with optional country and area code" },
+    { name: "send_message", description: "Send an SMS or iMessage from an agent's phone number" },
+    { name: "get_messages", description: "Get SMS messages for a specific phone number" },
+    { name: "list_conversations", description: "List SMS conversation threads, optionally filtered by agent" },
+    { name: "get_conversation", description: "Get a specific conversation with full message history" },
+    { name: "update_conversation", description: "Set or clear metadata on a conversation" },
+    { name: "list_calls", description: "List recent calls with optional agent, number, status, or direction filters" },
+    { name: "get_call", description: "Get call details and transcript with optional long-polling" },
+    { name: "make_call", description: "Place an outbound call with optional voice override, using webhook for conversation handling" },
+    { name: "make_conversation_call", description: "Place an autonomous AI call that returns the full transcript" },
+    { name: "list_agents", description: "List all agents with phone numbers and voice config" },
+    { name: "create_agent", description: "Create a new agent with voice, system prompt, model tier, call transfer, and voicemail" },
+    { name: "update_agent", description: "Update agent configuration including voice, model tier, transfer, and voicemail" },
+    { name: "delete_agent", description: "Delete an agent" },
+    { name: "get_agent", description: "Get agent details including numbers and voice config" },
+    { name: "attach_number", description: "Assign a phone number to an agent" },
+    { name: "detach_number", description: "Detach a phone number from an agent" },
+    { name: "list_voices", description: "List available voice options" },
+    { name: "get_webhook", description: "Get webhook configuration (project-level or per-agent)" },
+    { name: "set_webhook", description: "Set webhook URL for inbound messages and call events" },
+    { name: "delete_webhook", description: "Remove a webhook" },
+    { name: "test_webhook", description: "Send a test event to verify a webhook is working" },
+    { name: "list_webhook_deliveries", description: "View recent webhook delivery history" },
+  ],
+  resources: [],
+  prompts: [],
+};
+
+// ---------------------------------------------------------------------------
 // HTTP transport (--http)
 //
 // Stateless mode: each POST creates a fresh McpServer + transport so the
@@ -122,6 +167,18 @@ async function startHttp(): Promise<void> {
       if (url.pathname === "/health" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
+
+      // MCP Server Card (no auth required) — lets Smithery and other
+      // directories discover tools without scanning the authenticated endpoint.
+      if (url.pathname === "/.well-known/mcp/server-card.json" && req.method === "GET") {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        });
+        res.end(JSON.stringify(serverCard));
         return;
       }
 
