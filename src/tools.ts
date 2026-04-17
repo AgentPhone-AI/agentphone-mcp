@@ -22,6 +22,9 @@ function err(error: unknown): ToolResult {
     const base = error.detail;
     let hint = "";
     switch (error.status) {
+      case 0:
+        hint = " Request timed out — retry, or pass a longer timeout if the tool supports one.";
+        break;
       case 401:
         hint = " Check your AGENTPHONE_API_KEY.";
         break;
@@ -34,6 +37,8 @@ function err(error: unknown): ToolResult {
           hint = " Use list_calls to see recent call IDs.";
         else if (error.path.includes("/conversations/"))
           hint = " Use list_conversations to see valid conversation IDs.";
+        else if (error.path.includes("/webhook"))
+          hint = " Use get_webhook to check whether a webhook is configured.";
         break;
       case 429:
         hint = " Rate limited — wait a moment and try again.";
@@ -190,11 +195,16 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ limit, offset }) => {
       try {
-        const result = await api.listNumbers(limit);
+        const result = await api.listNumbers(limit, offset);
         return ok(JSON.stringify(result, null, 2));
       } catch (e) {
         return err(e);
@@ -930,10 +940,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map(
-            (c) =>
-              `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"}) id=${c.id}`
-          )
+          .map((c) => {
+            const preview = c.lastMessagePreview
+              ? ` "${c.lastMessagePreview.slice(0, 80)}${c.lastMessagePreview.length > 80 ? "…" : ""}"`
+              : "";
+            return `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"})${preview} id=${c.id}`;
+          })
           .join("\n");
 
         return ok(
