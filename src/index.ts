@@ -85,10 +85,22 @@ function extractBearerToken(req: IncomingMessage): string | null {
 
 /**
  * Resolve the API key for a request.
- * Priority: Authorization header > AGENTPHONE_API_KEY env var.
+ * Priority: Authorization header > query param > AGENTPHONE_API_KEY env var.
  */
 function resolveApiKey(req: IncomingMessage): string | null {
-  return extractBearerToken(req) || API_KEY || null;
+  // 1. Authorization: Bearer <key>
+  const bearer = extractBearerToken(req);
+  if (bearer) return bearer;
+
+  // 2. Query parameter (used by Smithery gateway and similar proxies)
+  const url = new URL(req.url || "/", "http://localhost");
+  const queryKey =
+    url.searchParams.get("AGENTPHONE_API_KEY") ||
+    url.searchParams.get("AgentPhone_API_Key");
+  if (queryKey) return queryKey;
+
+  // 3. Environment variable
+  return API_KEY || null;
 }
 
 // ---------------------------------------------------------------------------
