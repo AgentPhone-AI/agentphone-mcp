@@ -163,6 +163,7 @@ export class AgentPhoneAPI {
         systemPrompt: string | null;
         beginMessage: string | null;
         voice: string;
+        modelTier: string;
         transferNumber: string | null;
         voicemailMessage: string | null;
         createdAt: string;
@@ -183,6 +184,7 @@ export class AgentPhoneAPI {
     systemPrompt?: string;
     beginMessage?: string;
     voice?: string;
+    modelTier?: string;
     transferNumber?: string;
     voicemailMessage?: string;
   }) {
@@ -194,6 +196,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
@@ -210,6 +213,7 @@ export class AgentPhoneAPI {
       systemPrompt?: string;
       beginMessage?: string;
       voice?: string;
+      modelTier?: string;
       transferNumber?: string;
       voicemailMessage?: string;
     }
@@ -222,6 +226,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
@@ -246,6 +251,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
