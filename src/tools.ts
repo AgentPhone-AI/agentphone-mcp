@@ -589,21 +589,23 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
             .filter(Boolean)
             .join("\n");
 
-          return ok(
-            [
-              `Call completed!`,
-              `  From: ${result.fromNumber}`,
-              `  To: ${result.toNumber}`,
-              `  Call ID: ${result.id}`,
-              `  Status: ${result.status}`,
-              result.endedAt ? `  Ended: ${result.endedAt}` : null,
-              ``,
-              `Transcript:`,
-              transcript,
-            ]
-              .filter(Boolean)
-              .join("\n")
-          );
+          if (transcript) {
+            return ok(
+              [
+                `Call completed!`,
+                `  From: ${result.fromNumber}`,
+                `  To: ${result.toNumber}`,
+                `  Call ID: ${result.id}`,
+                `  Status: ${result.status}`,
+                result.endedAt ? `  Ended: ${result.endedAt}` : null,
+                ``,
+                `Transcript:`,
+                transcript,
+              ]
+                .filter(Boolean)
+                .join("\n")
+            );
+          }
         }
 
         return ok(
