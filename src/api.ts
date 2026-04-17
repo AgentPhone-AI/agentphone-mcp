@@ -163,6 +163,7 @@ export class AgentPhoneAPI {
         systemPrompt: string | null;
         beginMessage: string | null;
         voice: string;
+        modelTier: string;
         transferNumber: string | null;
         voicemailMessage: string | null;
         createdAt: string;
@@ -183,6 +184,7 @@ export class AgentPhoneAPI {
     systemPrompt?: string;
     beginMessage?: string;
     voice?: string;
+    modelTier?: string;
     transferNumber?: string;
     voicemailMessage?: string;
   }) {
@@ -194,6 +196,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
@@ -210,6 +213,7 @@ export class AgentPhoneAPI {
       systemPrompt?: string;
       beginMessage?: string;
       voice?: string;
+      modelTier?: string;
       transferNumber?: string;
       voicemailMessage?: string;
     }
@@ -222,6 +226,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
@@ -246,6 +251,7 @@ export class AgentPhoneAPI {
       systemPrompt: string | null;
       beginMessage: string | null;
       voice: string;
+      modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
       createdAt: string;
@@ -606,16 +612,13 @@ export class AgentPhoneAPI {
     return this.request<{ success: boolean }>("DELETE", "/v1/webhooks");
   }
 
-  async testWebhook(agentId?: string) {
-    const body: Record<string, unknown> = {};
-    if (agentId !== undefined) body.agentId = agentId;
-
+  async testWebhook() {
     return this.request<{
       success: boolean;
       statusCode: number | null;
       responseMs: number | null;
       error: string | null;
-    }>("POST", "/v1/webhooks/test", body);
+    }>("POST", "/v1/webhooks/test");
   }
 
   async listWebhookDeliveries(limit = 20, hours?: number) {

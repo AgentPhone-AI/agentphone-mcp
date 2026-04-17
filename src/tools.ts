@@ -22,6 +22,9 @@ function err(error: unknown): ToolResult {
     const base = error.detail;
     let hint = "";
     switch (error.status) {
+      case 0:
+        hint = " Request timed out — retry, or pass a longer timeout if the tool supports one.";
+        break;
       case 401:
         hint = " Check your AGENTPHONE_API_KEY.";
         break;
@@ -34,6 +37,8 @@ function err(error: unknown): ToolResult {
           hint = " Use list_calls to see recent call IDs.";
         else if (error.path.includes("/conversations/"))
           hint = " Use list_conversations to see valid conversation IDs.";
+        else if (error.path.includes("/webhook"))
+          hint = " Use get_webhook to check whether a webhook is configured.";
         break;
       case 429:
         hint = " Rate limited — wait a moment and try again.";
@@ -190,11 +195,16 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ limit, offset }) => {
       try {
-        const result = await api.listNumbers(limit);
+        const result = await api.listNumbers(limit, offset);
         return ok(JSON.stringify(result, null, 2));
       } catch (e) {
         return err(e);
@@ -429,10 +439,14 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (result.transcripts && result.transcripts.length > 0) {
           transcript = result.transcripts
             .map((t) => {
-              const response = t.response ? `\n  Agent: ${t.response}` : "";
-              return `  Human: ${t.transcript}${response}`;
+              const parts: string[] = [];
+              if (t.transcript) parts.push(`  Human: ${t.transcript}`);
+              if (t.response) parts.push(`  Agent: ${t.response}`);
+              return parts.join("\n");
             })
+            .filter(Boolean)
             .join("\n");
+          if (!transcript) transcript = "No transcript available.";
         }
 
         return ok(
@@ -567,26 +581,31 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (wait && result.transcripts && result.transcripts.length > 0) {
           const transcript = result.transcripts
             .map((t) => {
-              const response = t.response ? `\n  Agent: ${t.response}` : "";
-              return `  Human: ${t.transcript}${response}`;
+              const parts: string[] = [];
+              if (t.transcript) parts.push(`  Human: ${t.transcript}`);
+              if (t.response) parts.push(`  Agent: ${t.response}`);
+              return parts.join("\n");
             })
+            .filter(Boolean)
             .join("\n");
 
-          return ok(
-            [
-              `Call completed!`,
-              `  From: ${result.fromNumber}`,
-              `  To: ${result.toNumber}`,
-              `  Call ID: ${result.id}`,
-              `  Status: ${result.status}`,
-              result.endedAt ? `  Ended: ${result.endedAt}` : null,
-              ``,
-              `Transcript:`,
-              transcript,
-            ]
-              .filter(Boolean)
-              .join("\n")
-          );
+          if (transcript) {
+            return ok(
+              [
+                `Call completed!`,
+                `  From: ${result.fromNumber}`,
+                `  To: ${result.toNumber}`,
+                `  Call ID: ${result.id}`,
+                `  Status: ${result.status}`,
+                result.endedAt ? `  Ended: ${result.endedAt}` : null,
+                ``,
+                `Transcript:`,
+                transcript,
+              ]
+                .filter(Boolean)
+                .join("\n")
+            );
+          }
         }
 
         return ok(
@@ -666,6 +685,13 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Voice ID for the agent (use list_voices to see options). Defaults to 'Skylar - Friendly Guide'."),
+      model_tier: z
+        .enum(["turbo", "balanced", "max"])
+        .optional()
+        .describe(
+          "Model quality/speed tier for hosted-mode agents. " +
+            "'turbo' = fastest/cheapest, 'balanced' (default) = general use, 'max' = highest quality."
+        ),
       transfer_number: z
         .string()
         .optional()
@@ -675,8 +701,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .optional()
         .describe("Voicemail greeting text. When set, unanswered calls hear this message and can leave a voicemail."),
     },
-    {},
-    async ({ name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+    async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -690,11 +715,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           systemPrompt: system_prompt,
           beginMessage: begin_message,
           voice,
+          modelTier: model_tier,
           transferNumber: transfer_number,
           voicemailMessage: voicemail_message,
         });
         return ok(
-          `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n\n${JSON.stringify(result, null, 2)}`
+          `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n  Model Tier: ${result.modelTier}\n\n${JSON.stringify(result, null, 2)}`
         );
       } catch (e) {
         return err(e);
@@ -727,6 +753,13 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Voice ID (use list_voices to see options)."),
+      model_tier: z
+        .enum(["turbo", "balanced", "max"])
+        .optional()
+        .describe(
+          "Model quality/speed tier for hosted-mode agents. " +
+            "'turbo' = fastest/cheapest, 'balanced' = general use, 'max' = highest quality."
+        ),
       transfer_number: z
         .string()
         .optional()
@@ -737,7 +770,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .describe("Voicemail greeting text, or empty string to disable voicemail."),
     },
     { idempotentHint: true },
-    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, transfer_number, voicemail_message }) => {
+    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -751,12 +784,13 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (system_prompt !== undefined) params.systemPrompt = system_prompt;
         if (begin_message !== undefined) params.beginMessage = begin_message;
         if (voice !== undefined) params.voice = voice;
+        if (model_tier !== undefined) params.modelTier = model_tier;
         if (transfer_number !== undefined) params.transferNumber = transfer_number;
         if (voicemail_message !== undefined) params.voicemailMessage = voicemail_message;
 
         const result = await api.updateAgent(agent_id, params);
         return ok(
-          `Agent updated!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n\n${JSON.stringify(result, null, 2)}`
+          `Agent updated!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n  Model Tier: ${result.modelTier}\n\n${JSON.stringify(result, null, 2)}`
         );
       } catch (e) {
         return err(e);
@@ -908,10 +942,12 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map(
-            (c) =>
-              `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"}) id=${c.id}`
-          )
+          .map((c) => {
+            const preview = c.lastMessagePreview
+              ? ` "${c.lastMessagePreview.slice(0, 80)}${c.lastMessagePreview.length > 80 ? "…" : ""}"`
+              : "";
+            return `${c.participant} ↔ ${c.phoneNumber} (${c.messageCount} msgs, last: ${c.lastMessageAt || "never"})${preview} id=${c.id}`;
+          })
           .join("\n");
 
         return ok(
