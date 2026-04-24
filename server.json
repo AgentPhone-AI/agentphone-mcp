@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.agentphone-ai/agentphone",
+  "title": "AgentPhone",
+  "description": "Give AI agents real phone numbers, messages, and voice calls via MCP.",
+  "repository": {
+    "url": "https://github.com/AgentPhone-AI/agentphone-mcp",
+    "source": "github"
+  },
+  "version": "0.5.1",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.agentphone.to/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer token for AgentPhone API authentication (format: Bearer YOUR_API_KEY). Get your key at https://agentphone.to",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "agentphone-mcp",
+      "version": "0.5.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AGENTPHONE_API_KEY",
+          "description": "Your AgentPhone API key. Get one at https://agentphone.to",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
