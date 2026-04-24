@@ -1,13 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.agentphone-ai/agentphone",
+  "name": "io.github.AgentPhone-AI/agentphone",
   "title": "AgentPhone",
   "description": "Give AI agents real phone numbers, messages, and voice calls via MCP.",
   "repository": {
     "url": "https://github.com/AgentPhone-AI/agentphone-mcp",
     "source": "github"
   },
-  "version": "0.5.1",
+  "version": "0.5.2",
   "remotes": [
     {
       "type": "streamable-http",
@@ -26,7 +26,7 @@
     {
       "registryType": "npm",
       "identifier": "agentphone-mcp",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "transport": {
         "type": "stdio"
       },
