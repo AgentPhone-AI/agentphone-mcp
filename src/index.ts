@@ -47,7 +47,7 @@ const port = portIndex !== -1 ? parseInt(args[portIndex + 1], 10) : parseInt(pro
 
 const API_KEY = process.env.AGENTPHONE_API_KEY;
 const BASE_URL =
-  process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.to";
+  process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.ai";
 
 // In stdio mode, API key is always required from env var.
 // In HTTP mode, it can come from the Authorization header per-request.

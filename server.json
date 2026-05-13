@@ -11,11 +11,11 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://mcp.agentphone.to/mcp",
+      "url": "https://mcp.agentphone.ai/mcp",
       "headers": [
         {
           "name": "Authorization",
-          "description": "Bearer token for AgentPhone API authentication (format: Bearer YOUR_API_KEY). Get your key at https://agentphone.to",
+          "description": "Bearer token for AgentPhone API authentication (format: Bearer YOUR_API_KEY). Get your key at https://agentphone.ai",
           "isRequired": true,
           "isSecret": true
         }
@@ -33,7 +33,7 @@
       "environmentVariables": [
         {
           "name": "AGENTPHONE_API_KEY",
-          "description": "Your AgentPhone API key. Get one at https://agentphone.to",
+          "description": "Your AgentPhone API key. Get one at https://agentphone.ai",
           "isRequired": true,
           "format": "string",
           "isSecret": true
