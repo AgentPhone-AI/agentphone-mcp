@@ -10,7 +10,7 @@ Give AI agents real phone numbers, SMS, and voice calls via the [Model Context P
 
 ### 1. Get your API key
 
-Sign up at [agentphone.to](https://agentphone.to) and create an API key from **Settings**.
+Sign up at [agentphone.ai](https://agentphone.ai) and create an API key from **Settings**.
 
 ### 2. Connect via MCP
 
@@ -23,7 +23,7 @@ Point your MCP client at the hosted endpoint — no install needed:
   "mcpServers": {
     "agentphone": {
       "type": "streamable-http",
-      "url": "https://mcp.agentphone.to/mcp",
+      "url": "https://mcp.agentphone.ai/mcp",
       "headers": {
         "Authorization": "Bearer your_api_key_here"
       }
@@ -82,7 +82,7 @@ Once configured, just ask your AI agent things like:
 
 | Transport | Command | Use case |
 |-----------|---------|----------|
-| **Streamable HTTP** (remote) | `https://mcp.agentphone.to/mcp` | Agent platforms (Switchboard, etc.), remote clients |
+| **Streamable HTTP** (remote) | `https://mcp.agentphone.ai/mcp` | Agent platforms (Switchboard, etc.), remote clients |
 | **Streamable HTTP** (self-hosted) | `npx agentphone-mcp --http --port 3000` | Your own infrastructure |
 | **stdio** (default) | `npx agentphone-mcp` | Cursor, Claude Desktop, Windsurf, Claude Code |
 
@@ -173,7 +173,7 @@ All webhook tools accept an optional `agent_id` — pass it to manage an agent-s
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AGENTPHONE_API_KEY` | stdio: yes, HTTP: no | Your AgentPhone API key (HTTP mode can use Authorization header instead) |
-| `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.to`) |
+| `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.ai`) |
 | `PORT` | No | Port for HTTP mode (defaults to `3000`, overridden by `--port`) |
 
 ## Development
@@ -189,7 +189,7 @@ npm start       # Run compiled JS (stdio)
 
 ## How It Works
 
-This MCP server connects your AI assistant to the [AgentPhone API](https://agentphone.to). Your assistant talks to the MCP server, which calls the AgentPhone API, which talks to the phone network.
+This MCP server connects your AI assistant to the [AgentPhone API](https://agentphone.ai). Your assistant talks to the MCP server, which calls the AgentPhone API, which talks to the phone network.
 
 ```
 Your AI Assistant  <-->  agentphone-mcp  <-->  AgentPhone API  <-->  Phone Network
