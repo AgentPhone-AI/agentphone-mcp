@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 30 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 28 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -1200,69 +1200,56 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
   );
 
   server.tool(
-    "create_contact",
-    "Save a new contact (name + phone number, with optional email and notes).",
+    "manage_contact",
+    "Create, update, or delete a saved contact. Set `action` to choose the operation.\n\n" +
+      "- create: requires phone_number and name\n" +
+      "- update: requires contact_id; only the fields you pass are changed\n" +
+      "- delete: requires contact_id (permanent — confirm with the user first)\n\n" +
+      "Use list_contacts to find contact IDs.",
     {
+      action: z
+        .enum(["create", "update", "delete"])
+        .describe("The operation to perform"),
+      contact_id: z
+        .string()
+        .optional()
+        .describe("Contact ID. Required for 'update' and 'delete'."),
       phone_number: z
         .string()
-        .describe("Contact phone number in E.164 format (e.g. +14155551234)"),
-      name: z.string().describe("Contact name"),
+        .optional()
+        .describe("Phone number in E.164 format (e.g. +14155551234). Required for 'create'."),
+      name: z.string().optional().describe("Contact name. Required for 'create'."),
       email: z.string().email().optional().describe("Contact email address"),
       notes: z.string().optional().describe("Freeform notes about the contact"),
     },
-    { openWorldHint: true },
-    async ({ phone_number, name, email, notes }) => {
-      const phoneErr = validateE164(phone_number);
-      if (phoneErr) return err(new Error(phoneErr));
-      try {
-        const result = await api.createContact({ phoneNumber: phone_number, name, email, notes });
-        return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`);
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "update_contact",
-    "Update a saved contact. Only provided fields are changed. Use list_contacts to find the ID.",
-    {
-      contact_id: z.string().describe("The contact ID to update"),
-      phone_number: z.string().optional().describe("New phone number in E.164 format"),
-      name: z.string().optional().describe("New name"),
-      email: z.string().email().optional().describe("New email address"),
-      notes: z.string().optional().describe("New notes"),
-    },
-    { idempotentHint: true },
-    async ({ contact_id, phone_number, name, email, notes }) => {
+    { destructiveHint: true },
+    async ({ action, contact_id, phone_number, name, email, notes }) => {
       if (phone_number) {
         const phoneErr = validateE164(phone_number);
         if (phoneErr) return err(new Error(phoneErr));
       }
       try {
-        const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
-        if (phone_number !== undefined) params.phoneNumber = phone_number;
-        if (name !== undefined) params.name = name;
-        if (email !== undefined) params.email = email;
-        if (notes !== undefined) params.notes = notes;
-        const result = await api.updateContact(contact_id, params);
-        return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`);
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
+        if (action === "create") {
+          if (!phone_number || !name) {
+            return err(new Error("create requires both phone_number and name."));
+          }
+          const result = await api.createContact({ phoneNumber: phone_number, name, email, notes });
+          return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+        }
 
-  server.tool(
-    "delete_contact",
-    "Delete a saved contact permanently. Use list_contacts to find the ID.\n\n" +
-      "DO NOT USE without confirming with the user.",
-    {
-      contact_id: z.string().describe("The contact ID to delete"),
-    },
-    { destructiveHint: true },
-    async ({ contact_id }) => {
-      try {
+        if (action === "update") {
+          if (!contact_id) return err(new Error("update requires contact_id."));
+          const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
+          if (phone_number !== undefined) params.phoneNumber = phone_number;
+          if (name !== undefined) params.name = name;
+          if (email !== undefined) params.email = email;
+          if (notes !== undefined) params.notes = notes;
+          const result = await api.updateContact(contact_id, params);
+          return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+        }
+
+        // action === "delete"
+        if (!contact_id) return err(new Error("delete requires contact_id."));
         await api.deleteContact(contact_id);
         return ok(`Contact ${contact_id} deleted.`);
       } catch (e) {
