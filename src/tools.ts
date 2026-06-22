@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 26 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 30 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -1165,6 +1165,106 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         return ok(
           `Conversation updated.\n  ID: ${result.id}\n  Metadata: ${JSON.stringify(result.metadata)}`
         );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  // ============================================================
+  // Contacts
+  // ============================================================
+
+  server.tool(
+    "list_contacts",
+    "List saved contacts (your address book). Optionally filter with a search term that matches " +
+      "name or phone number.",
+    {
+      search: z.string().optional().describe("Filter by name or phone number"),
+      limit: z.number().min(1).max(100).default(50).describe("Max results to return"),
+      offset: z.number().min(0).default(0).describe("Number of results to skip (for pagination)"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ search, limit, offset }) => {
+      try {
+        const result = await api.listContacts(limit, offset, search);
+        if (result.data.length === 0) return ok("No contacts found.");
+        const formatted = result.data
+          .map((c) => `${c.name} — ${c.phoneNumber}${c.email ? ` <${c.email}>` : ""} id=${c.id}`)
+          .join("\n");
+        return ok(`${result.data.length} contact(s):\n\n${formatted}\n\nTotal: ${result.total}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "create_contact",
+    "Save a new contact (name + phone number, with optional email and notes).",
+    {
+      phone_number: z
+        .string()
+        .describe("Contact phone number in E.164 format (e.g. +14155551234)"),
+      name: z.string().describe("Contact name"),
+      email: z.string().email().optional().describe("Contact email address"),
+      notes: z.string().optional().describe("Freeform notes about the contact"),
+    },
+    { openWorldHint: true },
+    async ({ phone_number, name, email, notes }) => {
+      const phoneErr = validateE164(phone_number);
+      if (phoneErr) return err(new Error(phoneErr));
+      try {
+        const result = await api.createContact({ phoneNumber: phone_number, name, email, notes });
+        return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "update_contact",
+    "Update a saved contact. Only provided fields are changed. Use list_contacts to find the ID.",
+    {
+      contact_id: z.string().describe("The contact ID to update"),
+      phone_number: z.string().optional().describe("New phone number in E.164 format"),
+      name: z.string().optional().describe("New name"),
+      email: z.string().email().optional().describe("New email address"),
+      notes: z.string().optional().describe("New notes"),
+    },
+    { idempotentHint: true },
+    async ({ contact_id, phone_number, name, email, notes }) => {
+      if (phone_number) {
+        const phoneErr = validateE164(phone_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+      try {
+        const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
+        if (phone_number !== undefined) params.phoneNumber = phone_number;
+        if (name !== undefined) params.name = name;
+        if (email !== undefined) params.email = email;
+        if (notes !== undefined) params.notes = notes;
+        const result = await api.updateContact(contact_id, params);
+        return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "delete_contact",
+    "Delete a saved contact permanently. Use list_contacts to find the ID.\n\n" +
+      "DO NOT USE without confirming with the user.",
+    {
+      contact_id: z.string().describe("The contact ID to delete"),
+    },
+    { destructiveHint: true },
+    async ({ contact_id }) => {
+      try {
+        await api.deleteContact(contact_id);
+        return ok(`Contact ${contact_id} deleted.`);
       } catch (e) {
         return err(e);
       }

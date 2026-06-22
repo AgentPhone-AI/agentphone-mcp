@@ -606,6 +606,65 @@ export class AgentPhoneAPI {
     }>("PATCH", `/v1/conversations/${encodeURIComponent(conversationId)}`, { metadata });
   }
 
+  // --- Contacts ---
+
+  async listContacts(limit = 50, offset = 0, search?: string) {
+    let path = `/v1/contacts?limit=${limit}&offset=${offset}`;
+    if (search) path += `&search=${encodeURIComponent(search)}`;
+    return this.request<{
+      data: Array<{
+        id: string;
+        phoneNumber: string;
+        name: string;
+        email: string | null;
+        notes: string | null;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      hasMore: boolean;
+      total: number;
+    }>("GET", path);
+  }
+
+  async createContact(params: {
+    phoneNumber: string;
+    name: string;
+    email?: string;
+    notes?: string;
+  }) {
+    return this.request<{
+      id: string;
+      phoneNumber: string;
+      name: string;
+      email: string | null;
+      notes: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>("POST", "/v1/contacts", params);
+  }
+
+  async updateContact(
+    contactId: string,
+    params: { phoneNumber?: string; name?: string; email?: string; notes?: string }
+  ) {
+    return this.request<{
+      id: string;
+      phoneNumber: string;
+      name: string;
+      email: string | null;
+      notes: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>("PATCH", `/v1/contacts/${encodeURIComponent(contactId)}`, params);
+  }
+
+  async deleteContact(contactId: string) {
+    return this.request<{ success: boolean }>(
+      "DELETE",
+      `/v1/contacts/${encodeURIComponent(contactId)}`
+    );
+  }
+
   // --- Webhooks ---
 
   async getWebhook() {

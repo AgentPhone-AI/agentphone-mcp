@@ -108,7 +108,7 @@ Once configured, just ask your AI agent things like:
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
 
-## All Tools (26)
+## All Tools (30)
 
 ### Account
 
@@ -133,6 +133,15 @@ Once configured, just ask your AI agent things like:
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
 | `update_conversation` | Set metadata on a conversation |
+
+### Contacts
+
+| Tool | Description |
+|------|-------------|
+| `list_contacts` | List saved contacts (address book). Filter with a `search` term. |
+| `create_contact` | Save a new contact (name + phone, optional email/notes) |
+| `update_contact` | Update a saved contact |
+| `delete_contact` | Delete a saved contact |
 
 ### Voice Calls
 
