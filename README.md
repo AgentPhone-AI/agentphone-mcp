@@ -128,7 +128,7 @@ Once configured, just ask your AI agent things like:
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send an SMS from one of your agent's numbers |
+| `send_message` | Send SMS or iMessage. Supports media, threaded replies (`reply_to_message_id`), iMessage send effects (`send_style`), and group chats |
 | `get_messages` | Get messages for a specific number |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
@@ -148,7 +148,7 @@ Once configured, just ask your AI agent things like:
 | Tool | Description |
 |------|-------------|
 | `list_agents` | List all agents with their numbers and voice config |
-| `create_agent` | Create a new agent with voice, system prompt, call transfer, and voicemail |
+| `create_agent` | Create an agent with voice, system prompt, call transfer, voicemail, and voice tuning (speed, interruption sensitivity, backchannel, language, and more) |
 | `update_agent` | Update an agent's configuration |
 | `delete_agent` | Delete an agent (numbers are kept but unassigned) |
 | `get_agent` | Get agent details including phone numbers and voice config |
