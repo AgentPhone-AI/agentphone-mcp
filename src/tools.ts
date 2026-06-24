@@ -267,10 +267,11 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     {
       agent_id: z
         .string()
-        .describe("The agent ID (must have a phone number attached — use list_agents to check)"),
+        .optional()
+        .describe("The agent ID to send from (must have a phone number attached — use list_agents to check). Optional if you pass from_number or number_id instead."),
       to_number: z
         .string()
-        .describe("Recipient in E.164 format (e.g. +14155551234), or a group ID (grp_...) to post into an iMessage group chat"),
+        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Other destination identifiers are accepted and routed by the server."),
       body: z
         .string()
         .describe("The message text to send (may be empty when sending media only)"),
@@ -305,8 +306,13 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     },
     { openWorldHint: true },
     async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style }) => {
-      // Recipient may be an E.164 number or an iMessage group ID (grp_...)
-      if (!to_number.startsWith("grp_")) {
+      if (!agent_id && !from_number && !number_id) {
+        return err(new Error("Provide agent_id, from_number, or number_id to identify the sender."));
+      }
+      // Only enforce E.164 when the recipient is clearly a phone number (leading +).
+      // Short codes, group IDs (grp_...), emails, and other destination identifiers
+      // are passed through for the server to normalize and route.
+      if (to_number.startsWith("+")) {
         const phoneErr = validateE164(to_number);
         if (phoneErr) return err(new Error(phoneErr));
       }

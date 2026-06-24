@@ -114,7 +114,7 @@ export class AgentPhoneAPI {
   }
 
   async sendMessage(params: {
-    agentId: string;
+    agentId?: string;
     toNumber: string;
     body: string;
     mediaUrl?: string;
@@ -174,6 +174,15 @@ export class AgentPhoneAPI {
         modelTier: string;
         transferNumber: string | null;
         voicemailMessage: string | null;
+        sttMode: string;
+        ambientSound: string;
+        denoisingMode: string;
+        maxSilenceMs: number;
+        enableMessaging: boolean;
+        enableBackchannel: boolean;
+        interruptionSensitivity: number;
+        voiceSpeed: number;
+        language: string;
         createdAt: string;
         numbers?: Array<{
           id: string;
@@ -216,6 +225,15 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      sttMode: string;
+      ambientSound: string;
+      denoisingMode: string;
+      maxSilenceMs: number;
+      enableMessaging: boolean;
+      enableBackchannel: boolean;
+      interruptionSensitivity: number;
+      voiceSpeed: number;
+      language: string;
       createdAt: string;
       numbers: Array<{ id: string; phoneNumber: string; status: string }>;
     }>("POST", "/v1/agents", params);
@@ -255,6 +273,15 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      sttMode: string;
+      ambientSound: string;
+      denoisingMode: string;
+      maxSilenceMs: number;
+      enableMessaging: boolean;
+      enableBackchannel: boolean;
+      interruptionSensitivity: number;
+      voiceSpeed: number;
+      language: string;
       createdAt: string;
       numbers?: Array<{ id: string; phoneNumber: string; status: string }>;
     }>("PATCH", `/v1/agents/${encodeURIComponent(agentId)}`, params);
@@ -280,6 +307,15 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      sttMode: string;
+      ambientSound: string;
+      denoisingMode: string;
+      maxSilenceMs: number;
+      enableMessaging: boolean;
+      enableBackchannel: boolean;
+      interruptionSensitivity: number;
+      voiceSpeed: number;
+      language: string;
       createdAt: string;
       numbers?: Array<{
         id: string;
