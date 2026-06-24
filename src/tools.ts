@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 26 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 28 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -261,31 +261,59 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     "Send an SMS or iMessage from one of your agent's phone numbers.\n\n" +
       "USE THIS TOOL WHEN the user wants to text someone.\n" +
       "The agent must have at least one phone number attached. If the agent has multiple numbers, " +
-      "use number_id to specify which one to send from.",
+      "use number_id or from_number to choose which one to send from.\n" +
+      "iMessage extras (silently ignored on SMS): reply_to_message_id threads the reply under an " +
+      "earlier message, and send_style adds an expressive screen/bubble effect.",
     {
       agent_id: z
         .string()
         .describe("The agent ID (must have a phone number attached — use list_agents to check)"),
       to_number: z
         .string()
-        .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
+        .describe("Recipient in E.164 format (e.g. +14155551234), or a group ID (grp_...) to post into an iMessage group chat"),
       body: z
         .string()
-        .describe("The message text to send"),
+        .describe("The message text to send (may be empty when sending media only)"),
       media_url: z
         .string()
         .url()
         .optional()
-        .describe("URL of an image or media file to attach (MMS)"),
+        .describe("URL of a single image/media file to attach"),
+      media_urls: z
+        .array(z.string().url())
+        .optional()
+        .describe("Multiple media URLs to attach (delivered as an image carousel on iMessage)"),
       number_id: z
         .string()
         .optional()
         .describe("Specific phone number ID to send from (if agent has multiple numbers)"),
+      from_number: z
+        .string()
+        .optional()
+        .describe("Exact number to send from in E.164 format (alternative to number_id)"),
+      reply_to_message_id: z
+        .string()
+        .optional()
+        .describe("iMessage only. ID of an earlier message to reply to inline (threaded reply)"),
+      send_style: z
+        .enum([
+          "celebration", "fireworks", "lasers", "love", "confetti", "balloons",
+          "spotlight", "echo", "invisible", "gentle", "loud", "slam",
+        ])
+        .optional()
+        .describe("iMessage only. Expressive screen/bubble effect to send with the message"),
     },
     { openWorldHint: true },
-    async ({ agent_id, to_number, body, media_url, number_id }) => {
-      const phoneErr = validateE164(to_number);
-      if (phoneErr) return err(new Error(phoneErr));
+    async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style }) => {
+      // Recipient may be an E.164 number or an iMessage group ID (grp_...)
+      if (!to_number.startsWith("grp_")) {
+        const phoneErr = validateE164(to_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+      if (from_number) {
+        const fromErr = validateE164(from_number);
+        if (fromErr) return err(new Error(fromErr));
+      }
 
       try {
         const result = await api.sendMessage({
@@ -293,11 +321,24 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           toNumber: to_number,
           body,
           mediaUrl: media_url,
+          mediaUrls: media_urls,
           numberId: number_id,
+          fromNumber: from_number,
+          replyToMessageId: reply_to_message_id,
+          sendStyle: send_style,
         });
-        return ok(
-          `Message sent!\n  From: ${result.from}\n  To: ${result.to}\n  Status: ${result.status}\n  ID: ${result.id}`
-        );
+        const lines = [
+          `Message sent!`,
+          `  From: ${result.from_number}`,
+          `  To: ${result.to_number}`,
+          `  Channel: ${result.channel ?? "unknown"}`,
+          `  Status: ${result.status}`,
+          `  ID: ${result.id}`,
+        ];
+        if (result.reply_parent_unresolved) {
+          lines.push(`  Note: couldn't thread under the reply parent; delivered without threading.`);
+        }
+        return ok(lines.join("\n"));
       } catch (e) {
         return err(e);
       }
@@ -700,8 +741,50 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Voicemail greeting text. When set, unanswered calls hear this message and can leave a voicemail."),
+      voice_speed: z
+        .number()
+        .min(0.5)
+        .max(2)
+        .optional()
+        .describe("Speech speed multiplier. 1.0 = normal, 0.5 = half speed, 2.0 = double."),
+      interruption_sensitivity: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("How easily callers can interrupt (barge in). 0 = never, 1 = at first sound. Default 0.8."),
+      enable_backchannel: z
+        .boolean()
+        .optional()
+        .describe("Whether the agent interjects 'uh-huh'/'mhmm' while the caller speaks. Default true."),
+      enable_messaging: z
+        .boolean()
+        .optional()
+        .describe("Whether a hosted agent can send and read texts during a call. Default true."),
+      stt_mode: z
+        .enum(["fast", "accurate"])
+        .optional()
+        .describe("Speech-to-text mode: 'fast' (default) lowest latency, 'accurate' for exact names/numbers (~200ms slower)."),
+      ambient_sound: z
+        .enum(["none", "office", "coffee-shop", "outdoor"])
+        .optional()
+        .describe("Background ambience to mask synthetic silence between turns."),
+      denoising_mode: z
+        .enum(["noise-cancellation", "noise-and-background-speech-cancellation"])
+        .optional()
+        .describe("Audio denoising. The aggressive mode helps callers in cars/cafes (small surcharge)."),
+      max_silence_ms: z
+        .number()
+        .min(10000)
+        .max(3600000)
+        .optional()
+        .describe("Hang up after this many ms of caller silence. Default 600000 (10 min)."),
+      language: z
+        .string()
+        .optional()
+        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
     },
-    async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message }) => {
+    async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -718,6 +801,15 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
           modelTier: model_tier,
           transferNumber: transfer_number,
           voicemailMessage: voicemail_message,
+          voiceSpeed: voice_speed,
+          interruptionSensitivity: interruption_sensitivity,
+          enableBackchannel: enable_backchannel,
+          enableMessaging: enable_messaging,
+          sttMode: stt_mode,
+          ambientSound: ambient_sound,
+          denoisingMode: denoising_mode,
+          maxSilenceMs: max_silence_ms,
+          language,
         });
         return ok(
           `Agent created!\n  ID: ${result.id}\n  Name: ${result.name}\n  Voice Mode: ${result.voiceMode}\n  Voice: ${result.voice}\n  Model Tier: ${result.modelTier}\n\n${JSON.stringify(result, null, 2)}`
@@ -768,16 +860,58 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Voicemail greeting text, or empty string to disable voicemail."),
+      voice_speed: z
+        .number()
+        .min(0.5)
+        .max(2)
+        .optional()
+        .describe("Speech speed multiplier. 1.0 = normal, 0.5 = half speed, 2.0 = double."),
+      interruption_sensitivity: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("How easily callers can interrupt (barge in). 0 = never, 1 = at first sound. Default 0.8."),
+      enable_backchannel: z
+        .boolean()
+        .optional()
+        .describe("Whether the agent interjects 'uh-huh'/'mhmm' while the caller speaks. Default true."),
+      enable_messaging: z
+        .boolean()
+        .optional()
+        .describe("Whether a hosted agent can send and read texts during a call. Default true."),
+      stt_mode: z
+        .enum(["fast", "accurate"])
+        .optional()
+        .describe("Speech-to-text mode: 'fast' lowest latency, 'accurate' for exact names/numbers (~200ms slower)."),
+      ambient_sound: z
+        .enum(["none", "office", "coffee-shop", "outdoor"])
+        .optional()
+        .describe("Background ambience to mask synthetic silence between turns."),
+      denoising_mode: z
+        .enum(["noise-cancellation", "noise-and-background-speech-cancellation"])
+        .optional()
+        .describe("Audio denoising. The aggressive mode helps callers in cars/cafes (small surcharge)."),
+      max_silence_ms: z
+        .number()
+        .min(10000)
+        .max(3600000)
+        .optional()
+        .describe("Hang up after this many ms of caller silence. Default 600000 (10 min)."),
+      language: z
+        .string()
+        .optional()
+        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
     },
     { idempotentHint: true },
-    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message }) => {
+    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
       }
 
       try {
-        const params: Record<string, string | undefined> = {};
+        const params: Parameters<typeof api.updateAgent>[1] = {};
         if (name !== undefined) params.name = name;
         if (description !== undefined) params.description = description;
         if (voice_mode !== undefined) params.voiceMode = voice_mode;
@@ -787,6 +921,15 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         if (model_tier !== undefined) params.modelTier = model_tier;
         if (transfer_number !== undefined) params.transferNumber = transfer_number;
         if (voicemail_message !== undefined) params.voicemailMessage = voicemail_message;
+        if (voice_speed !== undefined) params.voiceSpeed = voice_speed;
+        if (interruption_sensitivity !== undefined) params.interruptionSensitivity = interruption_sensitivity;
+        if (enable_backchannel !== undefined) params.enableBackchannel = enable_backchannel;
+        if (enable_messaging !== undefined) params.enableMessaging = enable_messaging;
+        if (stt_mode !== undefined) params.sttMode = stt_mode;
+        if (ambient_sound !== undefined) params.ambientSound = ambient_sound;
+        if (denoising_mode !== undefined) params.denoisingMode = denoising_mode;
+        if (max_silence_ms !== undefined) params.maxSilenceMs = max_silence_ms;
+        if (language !== undefined) params.language = language;
 
         const result = await api.updateAgent(agent_id, params);
         return ok(
@@ -1022,6 +1165,93 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
         return ok(
           `Conversation updated.\n  ID: ${result.id}\n  Metadata: ${JSON.stringify(result.metadata)}`
         );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  // ============================================================
+  // Contacts
+  // ============================================================
+
+  server.tool(
+    "list_contacts",
+    "List saved contacts (your address book). Optionally filter with a search term that matches " +
+      "name or phone number.",
+    {
+      search: z.string().optional().describe("Filter by name or phone number"),
+      limit: z.number().min(1).max(100).default(50).describe("Max results to return"),
+      offset: z.number().min(0).default(0).describe("Number of results to skip (for pagination)"),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ search, limit, offset }) => {
+      try {
+        const result = await api.listContacts(limit, offset, search);
+        if (result.data.length === 0) return ok("No contacts found.");
+        const formatted = result.data
+          .map((c) => `${c.name} — ${c.phoneNumber}${c.email ? ` <${c.email}>` : ""} id=${c.id}`)
+          .join("\n");
+        return ok(`${result.data.length} contact(s):\n\n${formatted}\n\nTotal: ${result.total}`);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "manage_contact",
+    "Create, update, or delete a saved contact. Set `action` to choose the operation.\n\n" +
+      "- create: requires phone_number and name\n" +
+      "- update: requires contact_id; only the fields you pass are changed\n" +
+      "- delete: requires contact_id (permanent — confirm with the user first)\n\n" +
+      "Use list_contacts to find contact IDs.",
+    {
+      action: z
+        .enum(["create", "update", "delete"])
+        .describe("The operation to perform"),
+      contact_id: z
+        .string()
+        .optional()
+        .describe("Contact ID. Required for 'update' and 'delete'."),
+      phone_number: z
+        .string()
+        .optional()
+        .describe("Phone number in E.164 format (e.g. +14155551234). Required for 'create'."),
+      name: z.string().optional().describe("Contact name. Required for 'create'."),
+      email: z.string().email().optional().describe("Contact email address"),
+      notes: z.string().optional().describe("Freeform notes about the contact"),
+    },
+    { destructiveHint: true },
+    async ({ action, contact_id, phone_number, name, email, notes }) => {
+      if (phone_number) {
+        const phoneErr = validateE164(phone_number);
+        if (phoneErr) return err(new Error(phoneErr));
+      }
+      try {
+        if (action === "create") {
+          if (!phone_number || !name) {
+            return err(new Error("create requires both phone_number and name."));
+          }
+          const result = await api.createContact({ phoneNumber: phone_number, name, email, notes });
+          return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+        }
+
+        if (action === "update") {
+          if (!contact_id) return err(new Error("update requires contact_id."));
+          const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
+          if (phone_number !== undefined) params.phoneNumber = phone_number;
+          if (name !== undefined) params.name = name;
+          if (email !== undefined) params.email = email;
+          if (notes !== undefined) params.notes = notes;
+          const result = await api.updateContact(contact_id, params);
+          return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`);
+        }
+
+        // action === "delete"
+        if (!contact_id) return err(new Error("delete requires contact_id."));
+        await api.deleteContact(contact_id);
+        return ok(`Contact ${contact_id} deleted.`);
       } catch (e) {
         return err(e);
       }

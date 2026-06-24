@@ -118,23 +118,31 @@ export class AgentPhoneAPI {
     toNumber: string;
     body: string;
     mediaUrl?: string;
+    mediaUrls?: string[];
     numberId?: string;
+    fromNumber?: string;
+    replyToMessageId?: string;
+    sendStyle?: string;
   }) {
     return this.request<{
       id: string;
-      from: string;
-      to: string;
-      body: string;
-      direction: string;
       status: string;
       channel: string | null;
-      sentAt: string;
+      from_number: string;
+      to_number: string;
+      media_urls: string[];
+      reply_to_message_id: string | null;
+      reply_parent_unresolved: boolean | null;
     }>("POST", "/v1/messages", {
       agent_id: params.agentId,
       to_number: params.toNumber,
       body: params.body,
       media_url: params.mediaUrl,
+      media_urls: params.mediaUrls,
       number_id: params.numberId,
+      from_number: params.fromNumber,
+      reply_to_message_id: params.replyToMessageId,
+      send_style: params.sendStyle,
     });
   }
 
@@ -187,6 +195,15 @@ export class AgentPhoneAPI {
     modelTier?: string;
     transferNumber?: string;
     voicemailMessage?: string;
+    sttMode?: string;
+    ambientSound?: string;
+    denoisingMode?: string;
+    maxSilenceMs?: number;
+    enableMessaging?: boolean;
+    enableBackchannel?: boolean;
+    interruptionSensitivity?: number;
+    voiceSpeed?: number;
+    language?: string;
   }) {
     return this.request<{
       id: string;
@@ -216,6 +233,15 @@ export class AgentPhoneAPI {
       modelTier?: string;
       transferNumber?: string;
       voicemailMessage?: string;
+      sttMode?: string;
+      ambientSound?: string;
+      denoisingMode?: string;
+      maxSilenceMs?: number;
+      enableMessaging?: boolean;
+      enableBackchannel?: boolean;
+      interruptionSensitivity?: number;
+      voiceSpeed?: number;
+      language?: string;
     }
   ) {
     return this.request<{
@@ -578,6 +604,65 @@ export class AgentPhoneAPI {
       metadata: Record<string, unknown> | null;
       createdAt: string;
     }>("PATCH", `/v1/conversations/${encodeURIComponent(conversationId)}`, { metadata });
+  }
+
+  // --- Contacts ---
+
+  async listContacts(limit = 50, offset = 0, search?: string) {
+    let path = `/v1/contacts?limit=${limit}&offset=${offset}`;
+    if (search) path += `&search=${encodeURIComponent(search)}`;
+    return this.request<{
+      data: Array<{
+        id: string;
+        phoneNumber: string;
+        name: string;
+        email: string | null;
+        notes: string | null;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      hasMore: boolean;
+      total: number;
+    }>("GET", path);
+  }
+
+  async createContact(params: {
+    phoneNumber: string;
+    name: string;
+    email?: string;
+    notes?: string;
+  }) {
+    return this.request<{
+      id: string;
+      phoneNumber: string;
+      name: string;
+      email: string | null;
+      notes: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>("POST", "/v1/contacts", params);
+  }
+
+  async updateContact(
+    contactId: string,
+    params: { phoneNumber?: string; name?: string; email?: string; notes?: string }
+  ) {
+    return this.request<{
+      id: string;
+      phoneNumber: string;
+      name: string;
+      email: string | null;
+      notes: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>("PATCH", `/v1/contacts/${encodeURIComponent(contactId)}`, params);
+  }
+
+  async deleteContact(contactId: string) {
+    return this.request<{ success: boolean }>(
+      "DELETE",
+      `/v1/contacts/${encodeURIComponent(contactId)}`
+    );
   }
 
   // --- Webhooks ---
