@@ -14,10 +14,11 @@
  *   1. The Authorization header on each request (multi-tenant / hosted)
  *   2. The AGENTPHONE_API_KEY env var (single-tenant / self-hosted)
  *
- * Tools (26):
+ * Tools (28):
  *   Overview:  account_overview
  *   Numbers:   list_numbers, buy_number
  *   SMS:       send_message, get_messages
+ *   Contacts:  list_contacts, manage_contact
  *   Calls:     list_calls, get_call, make_call, make_conversation_call
  *   Agents:    list_agents, create_agent, update_agent, delete_agent, get_agent, attach_number, detach_number, list_voices
  *   Convos:    list_conversations, get_conversation, update_conversation
@@ -132,18 +133,20 @@ const serverCard = {
     { name: "get_usage", description: "Detailed usage stats with optional daily or monthly breakdown" },
     { name: "list_numbers", description: "List all phone numbers in account" },
     { name: "buy_number", description: "Purchase a new phone number with optional country and area code" },
-    { name: "send_message", description: "Send an SMS or iMessage from an agent's phone number" },
+    { name: "send_message", description: "Send SMS or iMessage. Supports media, threaded replies, iMessage send effects, and group chats" },
     { name: "get_messages", description: "Get SMS messages for a specific phone number" },
     { name: "list_conversations", description: "List SMS conversation threads, optionally filtered by agent" },
     { name: "get_conversation", description: "Get a specific conversation with full message history" },
     { name: "update_conversation", description: "Set or clear metadata on a conversation" },
+    { name: "list_contacts", description: "List saved contacts (address book), optionally filtered by a search term" },
+    { name: "manage_contact", description: "Create, update, or delete a saved contact" },
     { name: "list_calls", description: "List recent calls with optional agent, number, status, or direction filters" },
     { name: "get_call", description: "Get call details and transcript with optional long-polling" },
     { name: "make_call", description: "Place an outbound call with optional voice override, using webhook for conversation handling" },
     { name: "make_conversation_call", description: "Place an autonomous AI call that returns the full transcript" },
     { name: "list_agents", description: "List all agents with phone numbers and voice config" },
-    { name: "create_agent", description: "Create a new agent with voice, system prompt, model tier, call transfer, and voicemail" },
-    { name: "update_agent", description: "Update agent configuration including voice, model tier, transfer, and voicemail" },
+    { name: "create_agent", description: "Create an agent with voice, system prompt, call transfer, voicemail, and voice tuning (speed, interruption sensitivity, backchannel, language, and more)" },
+    { name: "update_agent", description: "Update agent configuration including voice, model tier, transfer, voicemail, and voice tuning" },
     { name: "delete_agent", description: "Delete an agent" },
     { name: "get_agent", description: "Get agent details including numbers and voice config" },
     { name: "attach_number", description: "Assign a phone number to an agent" },
