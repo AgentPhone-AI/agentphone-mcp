@@ -64,7 +64,7 @@ if (!httpMode && !API_KEY) {
 function createMcpServer(api: AgentPhoneAPI): McpServer {
   const server = new McpServer({
     name: "agentphone",
-    version: "0.5.2",
+    version: "0.6.0",
   });
   registerTools(server, api);
   return server;
@@ -122,7 +122,7 @@ async function startStdio(): Promise<void> {
 const serverCard = {
   serverInfo: {
     name: "agentphone",
-    version: "0.5.2",
+    version: "0.6.0",
   },
   authentication: {
     required: true,

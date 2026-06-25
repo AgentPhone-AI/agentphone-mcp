@@ -7,7 +7,7 @@
     "url": "https://github.com/AgentPhone-AI/agentphone-mcp",
     "source": "github"
   },
-  "version": "0.5.2",
+  "version": "0.6.0",
   "remotes": [
     {
       "type": "streamable-http",
@@ -26,7 +26,7 @@
     {
       "registryType": "npm",
       "identifier": "agentphone-mcp",
-      "version": "0.5.2",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       },
