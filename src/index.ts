@@ -64,12 +64,14 @@ async function verifyTokenAgainstBackend(
   if (!res.ok) throw new Error(`Token verification failed (${res.status})`);
   const data: any = await res.json().catch(() => ({}));
   const user = data.user ?? data;
+  // Spread the raw response first so our derived identity fields win — a
+  // top-level `sub`/`email` in /auth/me must not override the user's id.
   return {
     payload: {
+      ...data,
       sub: String(user?.id ?? user?.user_id ?? "unknown"),
       email: user?.email,
       name: user?.name,
-      ...data,
     },
   };
 }
