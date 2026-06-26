@@ -122,10 +122,12 @@ function resolveApiKey(req: IncomingMessage): string | null {
  * canonical MCP host.
  */
 function publicOrigin(req: IncomingMessage): string {
+  // Multi-hop proxies send these as comma-separated lists; take the first
+  // (client-facing) value and trim it for both proto and host.
   const proto =
     (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() || "https";
   const host =
-    (req.headers["x-forwarded-host"] as string | undefined) ||
+    (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim() ||
     req.headers.host ||
     "mcp.agentphone.ai";
   return `${proto}://${host}`;
