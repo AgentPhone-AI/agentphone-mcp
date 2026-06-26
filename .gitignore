@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tsbuildinfo
 .env
+.mcp-use/
+tool-registry.d.ts

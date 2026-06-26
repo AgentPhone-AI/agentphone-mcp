@@ -7,9 +7,11 @@
 
 export class AgentPhoneAPI {
   private baseUrl: string;
-  private apiKey: string;
+  // A static key, or a getter resolved per request (used when the credential
+  // comes from the per-request OAuth token rather than a fixed env var).
+  private apiKey: string | (() => string);
 
-  constructor(baseUrl: string, apiKey: string) {
+  constructor(baseUrl: string, apiKey: string | (() => string)) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
   }
@@ -21,8 +23,9 @@ export class AgentPhoneAPI {
     timeoutMs?: number
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const token = typeof this.apiKey === "function" ? this.apiKey() : this.apiKey;
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.apiKey}`,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
 

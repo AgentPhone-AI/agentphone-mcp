@@ -78,40 +78,38 @@ Once configured, just ask your AI agent things like:
 - *"Set up a webhook so I get notified when someone calls or texts my number"*
 - *"Show me this month's usage breakdown"*
 
-## Transports
+## Transport & hosting
 
-| Transport | Command | Use case |
-|-----------|---------|----------|
-| **Streamable HTTP** (remote) | `https://mcp.agentphone.ai/mcp` | Agent platforms (Switchboard, etc.), remote clients |
-| **Streamable HTTP** (self-hosted) | `npx agentphone-mcp --http --port 3000` | Your own infrastructure |
-| **stdio** (default) | `npx agentphone-mcp` | Cursor, Claude Desktop, Windsurf, Claude Code |
+The server is built on the [mcp-use](https://docs.mcp-use.com) server framework,
+which owns the HTTP layer: Streamable HTTP, the SSE stream, session management,
+and the OAuth discovery endpoints. `npm start` (or the Docker image) runs it as
+an HTTP server on `PORT` (default 3000), reachable at `/mcp`.
+
+- **Hosted:** `https://mcp.agentphone.ai/mcp`
+- **Self-hosted:** `PORT=3000 npm start` → `http://localhost:3000/mcp`
 
 ### Authentication
 
-Two ways to authenticate in HTTP mode:
+1. **OAuth (recommended for end users):** the framework proxies an
+   Authorization Code + PKCE flow to the AgentPhone authorization server, so the
+   client opens a browser to sign in at agentphone.ai — no key to paste. Enable
+   it by setting `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` (a client
+   pre-registered with the AgentPhone AS).
+2. **API key (scripts / single-tenant):** set `AGENTPHONE_API_KEY`. Used as the
+   fallback credential when no OAuth token is present.
 
-1. **OAuth (recommended for end users):** Connect with no API key and the client
-   opens a browser window to sign in at agentphone.ai. The MCP server is an
-   OAuth 2.1 protected resource; the AgentPhone API is the Authorization Server.
-   Clients discover it automatically via the standard well-known endpoints and
-   run Dynamic Client Registration + Authorization Code + PKCE. No key to paste.
-2. **API key (for scripts / self-hosting):** pass `Authorization: Bearer <key>`
-   per request, or set `AGENTPHONE_API_KEY` (stdio always uses the env var).
+The per-request access token is forwarded to the AgentPhone REST API, so the
+server stores no credentials.
 
-The OAuth access token is forwarded to the AgentPhone API per request, so the
-hosted server stays stateless and stores no credentials.
+### Environment
 
-### Endpoints (HTTP mode)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/mcp` | MCP Streamable HTTP endpoint (stateless — each request is independent) |
-| `GET` | `/health` | Health check |
-| `GET` | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata (RFC 9728) — points clients at the Authorization Server |
-
-On an unauthenticated `POST /mcp` the server returns `401` with a
-`WWW-Authenticate: Bearer resource_metadata="…"` header so OAuth-capable clients
-can start the sign-in flow.
+| Var | Purpose |
+|-----|---------|
+| `PORT` | HTTP port (default 3000) |
+| `AGENTPHONE_API_KEY` | Fallback API key when OAuth is off |
+| `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` | Enable OAuth; client pre-registered with the AgentPhone AS |
+| `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
+| `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
 
 ## Highlights
 
