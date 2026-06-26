@@ -4,7 +4,6 @@
  * 28 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { AgentPhoneAPI, ApiError } from "./api.js";
 
@@ -12,6 +11,30 @@ type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
 };
+
+/**
+ * Minimal registration surface this module needs. Implemented by an adapter in
+ * index.ts that forwards to the mcp-use MCPServer. Keeping the SDK-style
+ * (name, description, schema, annotations, handler) signature lets every tool
+ * definition below stay unchanged across the transport migration.
+ */
+export interface ToolRegistrar {
+  // With annotations (matches the SDK's 5-arg overload).
+  tool(
+    name: string,
+    description: string,
+    schema: Record<string, z.ZodTypeAny>,
+    annotations: Record<string, unknown>,
+    handler: (args: any) => Promise<ToolResult>
+  ): void;
+  // Without annotations (SDK's 4-arg overload).
+  tool(
+    name: string,
+    description: string,
+    schema: Record<string, z.ZodTypeAny>,
+    handler: (args: any) => Promise<ToolResult>
+  ): void;
+}
 
 function ok(text: string): ToolResult {
   return { content: [{ type: "text", text }] };
@@ -74,7 +97,7 @@ function validateAreaCode(code: string): string | null {
   return null;
 }
 
-export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
+export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   // ============================================================
   // Account Overview
   // ============================================================
@@ -1160,7 +1183,7 @@ export function registerTools(server: McpServer, api: AgentPhoneAPI): void {
     {
       conversation_id: z.string().describe("The conversation ID"),
       metadata: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .nullable()
         .describe("JSON metadata object to store on the conversation, or null to clear"),
     },
