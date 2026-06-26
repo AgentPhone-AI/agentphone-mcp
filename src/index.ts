@@ -56,6 +56,12 @@ const API_KEY = process.env.AGENTPHONE_API_KEY;
 const BASE_URL =
   process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.ai";
 
+// OAuth Authorization Server that protects this resource. MCP clients are
+// pointed here for dynamic registration + the authorize/token flow. Defaults
+// to the AgentPhone API, which hosts the OAuth endpoints.
+const OAUTH_AUTH_SERVER =
+  process.env.AGENTPHONE_OAUTH_ISSUER?.replace(/\/$/, "") || BASE_URL.replace(/\/$/, "");
+
 // In stdio mode, API key is always required from env var.
 // In HTTP mode, it can come from the Authorization header per-request.
 if (!httpMode && !API_KEY) {
@@ -108,6 +114,37 @@ function resolveApiKey(req: IncomingMessage): string | null {
 
   // 3. Environment variable
   return API_KEY || null;
+}
+
+/**
+ * Public origin (scheme + host) this request was made to, honoring the
+ * reverse-proxy headers set by Cloudflare / Manufact. Falls back to the
+ * canonical MCP host.
+ */
+function publicOrigin(req: IncomingMessage): string {
+  // Multi-hop proxies send these as comma-separated lists; take the first
+  // (client-facing) value and trim it for both proto and host. When there's no
+  // forwarded proto (e.g. local `npx agentphone-mcp --http`), fall back to the
+  // actual socket encryption so self-hosted HTTP advertises http://, not https.
+  const proto =
+    (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() ||
+    ((req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
+  const host =
+    (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim() ||
+    req.headers.host ||
+    "mcp.agentphone.ai";
+  return `${proto}://${host}`;
+}
+
+/** The OAuth 2.0 Protected Resource Metadata document (RFC 9728). */
+function protectedResourceMetadata(req: IncomingMessage) {
+  return {
+    resource: `${publicOrigin(req)}/mcp`,
+    authorization_servers: [OAUTH_AUTH_SERVER],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["mcp"],
+    resource_documentation: "https://docs.agentphone.ai",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +240,41 @@ async function startHttp(): Promise<void> {
         return;
       }
 
+      // OAuth 2.0 Protected Resource Metadata (RFC 9728). MCP clients fetch
+      // this to discover the Authorization Server. Served at the bare path and
+      // the resource-suffixed variant (some clients append the resource path).
+      if (
+        (url.pathname === "/.well-known/oauth-protected-resource" ||
+          url.pathname === "/.well-known/oauth-protected-resource/mcp") &&
+        req.method === "GET"
+      ) {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          // The document is derived from the request host, so it must not be
+          // shared across hosts by intermediary caches.
+          "Cache-Control": "public, max-age=3600",
+          Vary: "Host, X-Forwarded-Host, X-Forwarded-Proto",
+        });
+        res.end(JSON.stringify(protectedResourceMetadata(req)));
+        return;
+      }
+
+      // Compatibility: clients that look for the Authorization Server metadata
+      // on the resource origin get redirected to the real AS.
+      if (
+        (url.pathname === "/.well-known/oauth-authorization-server" ||
+          url.pathname === "/.well-known/openid-configuration") &&
+        req.method === "GET"
+      ) {
+        res.writeHead(302, {
+          Location: `${OAUTH_AUTH_SERVER}${url.pathname}`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end();
+        return;
+      }
+
       // Only /mcp is handled
       if (url.pathname !== "/mcp") {
         res.writeHead(404, { "Content-Type": "application/json" });
@@ -213,14 +285,21 @@ async function startHttp(): Promise<void> {
       if (req.method === "POST") {
         const apiKey = resolveApiKey(req);
         if (!apiKey) {
-          res.writeHead(401, { "Content-Type": "application/json" });
+          // Point OAuth-capable clients at the protected-resource metadata so
+          // they can run the authorization flow (RFC 9728 §5.1). Clients that
+          // prefer a static API key can still send Authorization: Bearer.
+          const resourceMetadataUrl = `${publicOrigin(req)}/.well-known/oauth-protected-resource`;
+          res.writeHead(401, {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": `Bearer resource_metadata="${resourceMetadataUrl}"`,
+          });
           res.end(
             JSON.stringify({
               jsonrpc: "2.0",
               error: {
                 code: -32000,
                 message:
-                  "Authentication required. Pass your AgentPhone API key via Authorization: Bearer <key>",
+                  "Authentication required. Sign in via OAuth, or pass an AgentPhone API key via Authorization: Bearer <key>.",
               },
               id: null,
             })
