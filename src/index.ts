@@ -38,7 +38,13 @@ import { registerTools } from "./tools.js";
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-const httpMode = args.includes("--http");
+// Default to HTTP mode when running under a hosting platform. Railway, Render,
+// Fly, mcp-use and friends all inject a PORT env var; local MCP clients (Claude
+// Desktop, npx) launch with a clean env and get stdio by default. An explicit
+// --stdio flag always wins, so the stdio default can be forced even when PORT
+// happens to be set.
+const stdioMode = args.includes("--stdio");
+const httpMode = args.includes("--http") || (!stdioMode && !!process.env.PORT);
 const portIndex = args.indexOf("--port");
 const port = portIndex !== -1 ? parseInt(args[portIndex + 1], 10) : parseInt(process.env.PORT || "3000", 10);
 
