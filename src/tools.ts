@@ -1183,7 +1183,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     {
       conversation_id: z.string().describe("The conversation ID"),
       metadata: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .nullable()
         .describe("JSON metadata object to store on the conversation, or null to clear"),
     },
