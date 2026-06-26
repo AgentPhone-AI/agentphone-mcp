@@ -88,9 +88,18 @@ Once configured, just ask your AI agent things like:
 
 ### Authentication
 
-- **stdio:** API key via `AGENTPHONE_API_KEY` environment variable
-- **HTTP (self-hosted):** API key via env var or `Authorization: Bearer <key>` header per request
-- **HTTP (hosted):** API key via `Authorization: Bearer <key>` header per request
+Two ways to authenticate in HTTP mode:
+
+1. **OAuth (recommended for end users):** Connect with no API key and the client
+   opens a browser window to sign in at agentphone.ai. The MCP server is an
+   OAuth 2.1 protected resource; the AgentPhone API is the Authorization Server.
+   Clients discover it automatically via the standard well-known endpoints and
+   run Dynamic Client Registration + Authorization Code + PKCE. No key to paste.
+2. **API key (for scripts / self-hosting):** pass `Authorization: Bearer <key>`
+   per request, or set `AGENTPHONE_API_KEY` (stdio always uses the env var).
+
+The OAuth access token is forwarded to the AgentPhone API per request, so the
+hosted server stays stateless and stores no credentials.
 
 ### Endpoints (HTTP mode)
 
@@ -98,6 +107,11 @@ Once configured, just ask your AI agent things like:
 |--------|------|-------------|
 | `POST` | `/mcp` | MCP Streamable HTTP endpoint (stateless — each request is independent) |
 | `GET` | `/health` | Health check |
+| `GET` | `/.well-known/oauth-protected-resource` | OAuth protected-resource metadata (RFC 9728) — points clients at the Authorization Server |
+
+On an unauthenticated `POST /mcp` the server returns `401` with a
+`WWW-Authenticate: Bearer resource_metadata="…"` header so OAuth-capable clients
+can start the sign-in flow.
 
 ## Highlights
 
