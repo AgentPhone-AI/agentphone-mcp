@@ -123,9 +123,12 @@ function resolveApiKey(req: IncomingMessage): string | null {
  */
 function publicOrigin(req: IncomingMessage): string {
   // Multi-hop proxies send these as comma-separated lists; take the first
-  // (client-facing) value and trim it for both proto and host.
+  // (client-facing) value and trim it for both proto and host. When there's no
+  // forwarded proto (e.g. local `npx agentphone-mcp --http`), fall back to the
+  // actual socket encryption so self-hosted HTTP advertises http://, not https.
   const proto =
-    (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() || "https";
+    (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0]?.trim() ||
+    ((req.socket as { encrypted?: boolean }).encrypted ? "https" : "http");
   const host =
     (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim() ||
     req.headers.host ||
@@ -248,7 +251,10 @@ async function startHttp(): Promise<void> {
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
+          // The document is derived from the request host, so it must not be
+          // shared across hosts by intermediary caches.
           "Cache-Control": "public, max-age=3600",
+          Vary: "Host, X-Forwarded-Host, X-Forwarded-Proto",
         });
         res.end(JSON.stringify(protectedResourceMetadata(req)));
         return;
