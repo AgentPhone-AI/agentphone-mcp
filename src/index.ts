@@ -316,15 +316,25 @@ async function startHttp(): Promise<void> {
         await server.connect(transport);
         await transport.handleRequest(req, res);
       } else if (req.method === "GET") {
-        // SSE streaming is not supported in stateless mode
-        res.writeHead(405, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            error: { code: -32000, message: "SSE streaming not supported in stateless mode. Use POST requests." },
-            id: null,
-          })
-        );
+        // Streamable HTTP defines an optional server->client SSE stream on GET.
+        // We're stateless and never push unsolicited messages, but some clients
+        // (e.g. the Manufact testing playground) open this stream and won't
+        // tolerate a 405. Serve a valid but idle SSE stream with keepalives so
+        // those clients connect; all real traffic still flows over POST.
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no", // disable proxy buffering so the stream flushes
+        });
+        res.write(": connected\n\n");
+        const keepAlive = setInterval(() => {
+          res.write(": keep-alive\n\n");
+        }, 25000);
+        const stop = () => clearInterval(keepAlive);
+        req.on("close", stop);
+        res.on("close", stop);
+        res.on("error", stop);
       } else if (req.method === "DELETE") {
         // No sessions to close in stateless mode
         res.writeHead(200, { "Content-Type": "application/json" });
