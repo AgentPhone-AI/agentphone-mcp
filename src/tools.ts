@@ -105,7 +105,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "account_overview",
     "Get a complete snapshot of your AgentPhone account: agents, phone numbers, webhook status, " +
-      "and usage limits. Call this first to orient yourself before using other tools.",
+      "and usage limits.",
     {},
     { readOnlyHint: true, idempotentHint: true },
     async () => {
@@ -209,8 +209,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_numbers",
-    "List all phone numbers in your account. Each number has an ID needed by other tools " +
-      "(get_messages, attach_number, list_calls).",
+    "List all phone numbers in your account, each with its ID, status, country, and assigned agent.",
     {
       limit: z
         .number()
@@ -282,16 +281,15 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "send_message",
     "Send an SMS or iMessage from one of your agent's phone numbers.\n\n" +
-      "USE THIS TOOL WHEN the user wants to text someone.\n" +
       "The agent must have at least one phone number attached. If the agent has multiple numbers, " +
-      "use number_id or from_number to choose which one to send from.\n" +
+      "number_id or from_number selects which one to send from.\n" +
       "iMessage extras (silently ignored on SMS): reply_to_message_id threads the reply under an " +
       "earlier message, and send_style adds an expressive screen/bubble effect.",
     {
       agent_id: z
         .string()
         .optional()
-        .describe("The agent ID to send from (must have a phone number attached — use list_agents to check). Optional if you pass from_number or number_id instead."),
+        .describe("The agent ID to send from (the agent must have a phone number attached). Optional if you pass from_number or number_id instead."),
       to_number: z
         .string()
         .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Other destination identifiers are accepted and routed by the server."),
@@ -376,8 +374,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_messages",
-    "Get SMS messages for a specific phone number. Use list_numbers to find the number ID. " +
-      "For threaded conversations, use list_conversations + get_conversation instead.",
+    "Get SMS messages for a specific phone number, identified by its number ID. " +
+      "Returns individual messages rather than grouped conversation threads.",
     {
       number_id: z.string().describe("The ID of the phone number"),
       limit: z
@@ -414,7 +412,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "list_calls",
     "List recent calls. Scope by agent_id or number_id, or use status/direction/search to filter globally.\n\n" +
       "When agent_id or number_id is passed, status/direction/search filters are not applied.\n" +
-      "Returns call IDs — use get_call with an ID to fetch the full transcript.",
+      "Returns call summaries including each call's ID, direction, participants, and status.",
     {
       agent_id: z
         .string()
@@ -482,7 +480,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_call",
-    "Get details and transcript for a specific call. Use list_calls to find call IDs. " +
+    "Get details and transcript for a specific call, identified by its call ID. " +
       "Pass wait=true to block until an in-progress call finishes before returning.",
     {
       call_id: z.string().describe("The call ID"),
@@ -541,15 +539,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "make_call",
-    "Initiate an outbound phone call.\n\n" +
-      "USE THIS TOOL WHEN the user wants to place a webhook-driven call where your backend " +
-      "handles the conversation logic.\n" +
-      "DO NOT USE when the user wants an autonomous AI conversation — use make_conversation_call instead.\n\n" +
-      "The agent must have a phone number attached and a webhook configured (set_webhook).",
+    "Initiate an outbound, webhook-driven phone call where your backend handles the " +
+      "conversation logic.\n\n" +
+      "The agent must have a phone number attached and a webhook configured.",
     {
       agent_id: z
         .string()
-        .describe("The agent ID (must have a phone number attached — use list_agents to check)"),
+        .describe("The agent ID (the agent must have a phone number attached)"),
       to_number: z
         .string()
         .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
@@ -564,7 +560,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("Voice ID override for this call (use list_voices to see options)"),
+        .describe("Voice ID override for this call"),
     },
     { openWorldHint: true },
     async ({ agent_id, to_number, initial_greeting, from_number_id, voice }) => {
@@ -590,11 +586,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "make_conversation_call",
-    "Place a phone call where the AI has an autonomous conversation about a given topic.\n\n" +
-      "USE THIS TOOL WHEN the user wants an AI agent to call someone and have a conversation — " +
-      "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n" +
-      "DO NOT USE when the user wants a webhook-driven call (use make_call instead).\n\n" +
-      "The agent must have a phone number attached. Use list_agents to check.\n" +
+    "Place a phone call where the AI has an autonomous conversation about a given topic — " +
+      "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n\n" +
+      "The agent must have a phone number attached.\n" +
       "By default this blocks until the call finishes and returns the full transcript. " +
       "Set wait=false for fire-and-forget.",
     {
@@ -629,7 +623,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("Voice ID override for this call (use list_voices to see options)"),
+        .describe("Voice ID override for this call"),
     },
     { openWorldHint: true },
     async ({ agent_id, to_number, topic, initial_greeting, wait, max_wait_seconds, from_number_id, voice }) => {
@@ -727,10 +721,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "create_agent",
     "Create a new agent. An agent owns phone numbers and handles calls/SMS.\n\n" +
-      "After creating, use buy_number or attach_number to give it a phone number.\n" +
+      "A newly created agent has no phone number until one is attached.\n" +
       "Set voice_mode to 'hosted' with a system_prompt for autonomous AI voice calls, " +
-      "or 'webhook' (default) to forward call transcripts to your webhook URL.\n" +
-      "Use list_voices to see available voice options.",
+      "or 'webhook' (default) to forward call transcripts to your webhook URL.",
     {
       name: z
         .string()
@@ -754,7 +747,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("Voice ID for the agent (use list_voices to see options). Defaults to 'Skylar - Friendly Guide'."),
+        .describe("Voice ID for the agent. Defaults to 'Skylar - Friendly Guide'."),
       model_tier: z
         .enum(["turbo", "balanced", "max"])
         .optional()
@@ -853,7 +846,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "update_agent",
     "Update an agent's configuration — name, description, voice settings, system prompt, greeting, " +
       "call transfer, or voicemail. Only provided fields are updated.\n" +
-      "Use list_voices to see available voice IDs. Switching voice_mode to 'hosted' requires a system_prompt.",
+      "Switching voice_mode to 'hosted' requires a system_prompt.",
     {
       agent_id: z.string().describe("The agent ID to update"),
       name: z.string().optional().describe("New name for the agent"),
@@ -873,7 +866,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("Voice ID (use list_voices to see options)."),
+        .describe("Voice ID for the agent."),
       model_tier: z
         .enum(["turbo", "balanced", "max"])
         .optional()
@@ -972,8 +965,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "delete_agent",
-    "Delete an agent permanently. Phone numbers attached to it will be kept but unassigned.\n\n" +
-      "DO NOT USE without confirming with the user — this cannot be undone.",
+    "Delete an agent permanently. Phone numbers attached to it are kept but unassigned. " +
+      "This cannot be undone.",
     {
       agent_id: z.string().describe("The agent ID to delete"),
     },
@@ -1008,7 +1001,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "attach_number",
     "Attach a phone number to an agent so the agent handles calls/SMS on that number. " +
-      "Use list_numbers to find unassigned number IDs and list_agents for agent IDs.",
+      "Takes an agent ID and a phone number ID.",
     {
       agent_id: z.string().describe("The agent ID"),
       number_id: z.string().describe("The phone number ID to attach"),
@@ -1028,8 +1021,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "detach_number",
-    "Detach a phone number from an agent. The number is kept in your account but becomes unassigned. " +
-      "Use list_agents or get_agent to see which numbers are attached.",
+    "Detach a phone number from an agent. The number is kept in your account but becomes unassigned.",
     {
       agent_id: z.string().describe("The agent ID that currently owns the number"),
       number_id: z.string().describe("The phone number ID to detach"),
@@ -1047,7 +1039,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_voices",
-    "List available voices for agents. Use the voice_id value when calling create_agent or update_agent.",
+    "List available voices for agents. Each voice has a voice_id used in an agent's voice field.",
     {},
     { readOnlyHint: true, idempotentHint: true },
     async () => {
@@ -1083,8 +1075,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "list_conversations",
     "List SMS conversations. Optionally filter by agent_id to see conversations for a specific agent.\n\n" +
-      "Each conversation is a thread between your number and an external contact. " +
-      "Use get_conversation with the ID to read messages.",
+      "Each conversation is a thread between your number and an external contact, with its ID, " +
+      "participant, message count, and last-message preview.",
     {
       agent_id: z
         .string()
@@ -1133,7 +1125,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_conversation",
-    "Get a specific SMS conversation with message history. Use list_conversations to find IDs.",
+    "Get a specific SMS conversation with full message history, identified by its conversation ID.",
     {
       conversation_id: z.string().describe("The conversation ID"),
       message_limit: z
@@ -1233,8 +1225,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Create, update, or delete a saved contact. Set `action` to choose the operation.\n\n" +
       "- create: requires phone_number and name\n" +
       "- update: requires contact_id; only the fields you pass are changed\n" +
-      "- delete: requires contact_id (permanent — confirm with the user first)\n\n" +
-      "Use list_contacts to find contact IDs.",
+      "- delete: requires contact_id (permanent)\n\n" +
+      "contact_id refers to a saved contact.",
     {
       action: z
         .enum(["create", "update", "delete"])
@@ -1461,8 +1453,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "delete_webhook",
     "Remove a webhook. Pass agent_id to remove an agent's webhook (falls back to project default). " +
-      "Omit agent_id to remove the project-level webhook.\n\n" +
-      "DO NOT USE without confirming with the user.",
+      "Omit agent_id to remove the project-level webhook.",
     {
       agent_id: z
         .string()
