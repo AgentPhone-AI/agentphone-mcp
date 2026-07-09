@@ -120,7 +120,7 @@ server stores no credentials.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
 
-## All Tools (28)
+## All Tools (29)
 
 ### Account
 
@@ -135,6 +135,7 @@ server stores no credentials.
 |------|-------------|
 | `list_numbers` | List all phone numbers in your account |
 | `buy_number` | Purchase a new phone number with optional `area_code` and `agent_id` |
+| `release_number` | Release a phone number from your account permanently |
 
 ### SMS
 
