@@ -140,7 +140,20 @@ async function startHttp(): Promise<void> {
           annotations: annotations as Record<string, unknown>,
         },
         async (params: unknown, ctx: any) => {
-          const token: string = ctx?.auth?.accessToken || process.env.AGENTPHONE_API_KEY || "";
+          // 1. OAuth flow: ctx.auth is populated by mcp-use when OAuth is enabled.
+          // 2. Direct API key via HTTP header: clients send "Authorization: Bearer <key>"
+          //    (README Option A). ctx.auth is undefined when OAuth is off, so we must
+          //    read the raw header to avoid falling back to an empty credential.
+          // 3. Fallback: AGENTPHONE_API_KEY env var (single-tenant self-hosted setups).
+          const rawAuthHeader: string =
+            ctx?.req?.header?.("authorization") ??
+            ctx?.req?.headers?.get?.("authorization") ??
+            "";
+          const headerToken = rawAuthHeader.startsWith("Bearer ")
+            ? rawAuthHeader.slice(7).trim()
+            : "";
+          const token: string =
+            ctx?.auth?.accessToken || headerToken || process.env.AGENTPHONE_API_KEY || "";
           return tokenStore.run(token, () => handler(params as any)) as any;
         }
       );
