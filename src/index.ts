@@ -149,7 +149,7 @@ async function startHttp(): Promise<void> {
             ctx?.req?.header?.("authorization") ??
             ctx?.req?.headers?.get?.("authorization") ??
             "";
-          const headerToken = rawAuthHeader.startsWith("Bearer ")
+          const headerToken = /^bearer /i.test(rawAuthHeader)
             ? rawAuthHeader.slice(7).trim()
             : "";
           const token: string =
