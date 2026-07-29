@@ -303,9 +303,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         if (areaErr) return err(new Error(areaErr));
       }
       if (!confirm) {
+        const params = [
+          `country="${country}"`,
+          area_code ? `area_code="${area_code}"` : null,
+          agent_id ? `agent_id="${agent_id}"` : null,
+          `confirm=true`,
+        ].filter(Boolean).join(", ");
         return ok(
-          `This will purchase a new ${country} phone number${area_code ? ` in area code ${area_code}` : ""} ` +
-            `and charge the account's balance. Confirm with the user, then call again with confirm=true to proceed.`
+          `This will purchase a new ${country} phone number${area_code ? ` in area code ${area_code}` : ""}` +
+            `${agent_id ? ` and attach it to agent ${agent_id}` : ""}, charging the account's balance. ` +
+            `Confirm with the user, then call buy_number again with the SAME arguments plus confirm=true: ${params}`
         );
       }
 
