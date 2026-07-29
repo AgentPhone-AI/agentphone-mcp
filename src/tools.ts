@@ -648,8 +648,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
       topic: z.string().describe(
-        "The conversation topic or instructions. This becomes the AI's system prompt. " +
-          "Be specific about what the AI should discuss, its personality, and any goals."
+        "The conversation goal for the AI to pursue. Embedded as the call objective inside a " +
+          "locked system prompt that always enforces AI self-identification (identity rules can't " +
+          "be overridden). Be specific about what to discuss and any goals."
       ),
       initial_greeting: z
         .string()
