@@ -327,6 +327,25 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     }
   );
 
+  server.tool(
+    "release_number",
+    "Release (delete) a phone number from your account. The number will no longer be usable. This cannot be undone.",
+    {
+      number_id: z.string().describe("The phone number ID to release. Use list_numbers to find IDs."),
+    },
+    { destructiveHint: true },
+    async ({ number_id }) => {
+      try {
+        const result = await api.releaseNumber(number_id);
+        return ok(
+          `Released number ${result.phoneNumber} (${result.status})`
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
   // ============================================================
   // SMS / Messages
   // ============================================================
