@@ -348,6 +348,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Other destination identifiers are accepted and routed by the server."),
       body: z
         .string()
+        .optional()
+        .default("")
         .describe("The message text to send (may be empty when sending media only)"),
       media_url: z
         .string()

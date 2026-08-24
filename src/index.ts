@@ -77,7 +77,21 @@ async function verifyTokenAgainstBackend(
 }
 
 async function startHttp(): Promise<void> {
-  const { MCPServer, oauthProxy } = await import("mcp-use/server");
+  const { MCPServer, oauthProxy, getRequestContext } = await import("mcp-use/server");
+
+  // Extract a Bearer token from the raw request when OAuth isn't configured.
+  // ctx.auth is only populated by the OAuth proxy flow; for the documented
+  // direct-API-key setup (Authorization: Bearer <key>, no OAuth), we must read
+  // the header ourselves or every call falls back to "" and 401s.
+  const bearerFromHeader = (): string => {
+    try {
+      const c: any = getRequestContext();
+      const raw: string = c?.req?.header?.("authorization") ?? "";
+      return raw.toLowerCase().startsWith("bearer ") ? raw.slice(7).trim() : "";
+    } catch {
+      return "";
+    }
+  };
 
   // Per-request credential: the framework passes ctx.auth (verified user + raw
   // access token). We stash the token in AsyncLocalStorage so the shared API
@@ -140,7 +154,8 @@ async function startHttp(): Promise<void> {
           annotations: annotations as Record<string, unknown>,
         },
         async (params: unknown, ctx: any) => {
-          const token: string = ctx?.auth?.accessToken || process.env.AGENTPHONE_API_KEY || "";
+          const token: string =
+            ctx?.auth?.accessToken || bearerFromHeader() || process.env.AGENTPHONE_API_KEY || "";
           return tokenStore.run(token, () => handler(params as any)) as any;
         }
       );
