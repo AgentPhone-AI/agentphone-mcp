@@ -149,6 +149,17 @@ export class AgentPhoneAPI {
     });
   }
 
+  async sendReaction(messageId: string, reaction: string) {
+    return this.request<{
+      id: string;
+      reaction_type: string;
+      message_id: string;
+      channel: string;
+    }>("POST", `/v1/messages/${encodeURIComponent(messageId)}/reactions`, {
+      reaction,
+    });
+  }
+
   // --- Agents ---
 
   async listVoices() {
