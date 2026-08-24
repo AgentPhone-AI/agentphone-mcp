@@ -333,11 +333,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "send_message",
-    "Send an SMS or iMessage from one of your agent's phone numbers.\n\n" +
+    "Send an SMS or iMessage from one of your agent's phone numbers, or react to a message.\n\n" +
       "The agent must have at least one phone number attached. If the agent has multiple numbers, " +
       "number_id or from_number selects which one to send from.\n" +
       "iMessage extras (silently ignored on SMS): reply_to_message_id threads the reply under an " +
-      "earlier message, and send_style adds an expressive screen/bubble effect.",
+      "earlier message, and send_style adds an expressive screen/bubble effect.\n" +
+      "To react to a message instead of sending one, set reaction and react_to_message_id " +
+      "(iMessage only); to_number and body are not needed in that case.",
     {
       agent_id: z
         .string()
@@ -345,7 +347,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("The agent ID to send from (the agent must have a phone number attached). Optional if you pass from_number or number_id instead."),
       to_number: z
         .string()
-        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Other destination identifiers are accepted and routed by the server."),
+        .optional()
+        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Required when sending a message (not needed for a reaction)."),
       body: z
         .string()
         .optional()
@@ -379,11 +382,35 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         ])
         .optional()
         .describe("iMessage only. Expressive screen/bubble effect to send with the message"),
+      react_to_message_id: z
+        .string()
+        .optional()
+        .describe("iMessage only. ID of a message to react to. Set together with `reaction`."),
+      reaction: z
+        .string()
+        .optional()
+        .describe("iMessage only. Tapback or single emoji applied to react_to_message_id: one of love, like, dislike, laugh, emphasize, question, or a single emoji (e.g. '🔥'). When set, this reacts instead of sending a message."),
     },
     { openWorldHint: true },
-    async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style }) => {
+    async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, react_to_message_id, reaction }) => {
+      // Reaction mode: react to an existing message instead of sending one.
+      if (reaction) {
+        if (!react_to_message_id) {
+          return err(new Error("reaction requires react_to_message_id (the message to react to)."));
+        }
+        try {
+          const r = await api.sendReaction(react_to_message_id, reaction);
+          return ok(`Reaction '${r.reaction_type}' sent to message ${r.message_id} (${r.channel}).`);
+        } catch (e) {
+          return err(e);
+        }
+      }
+
       if (!agent_id && !from_number && !number_id) {
         return err(new Error("Provide agent_id, from_number, or number_id to identify the sender."));
+      }
+      if (!to_number) {
+        return err(new Error("to_number is required when sending a message."));
       }
       // Only enforce E.164 when the recipient is clearly a phone number (leading +).
       // Short codes, group IDs (grp_...), emails, and other destination identifiers
