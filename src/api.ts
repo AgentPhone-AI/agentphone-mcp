@@ -776,17 +776,10 @@ export class AgentPhoneAPI {
   // --- Usage ---
 
   async getUsage() {
+    // NOTE: the legacy `plan` block (free/pro/scale + per-line limits) was
+    // removed from GET /v1/usage (agent-phone tasks#141) — it advertised
+    // limits nothing enforces. Messaging/voice bill per use from credits.
     return this.request<{
-      plan: {
-        name: string;
-        limits: {
-          numbers: number;
-          messagesPerMonth: number;
-          voiceMinutesPerMonth: number;
-          maxCallDurationMinutes: number;
-          concurrentCalls: number;
-        };
-      };
       numbers: {
         used: number;
         limit: number;
@@ -797,6 +790,7 @@ export class AgentPhoneAPI {
         messagesLast24h: number;
         messagesLast7d: number;
         messagesLast30d: number;
+        smsSegmentsLast30d: number;
         totalCalls: number;
         callsLast24h: number;
         callsLast7d: number;
@@ -816,8 +810,9 @@ export class AgentPhoneAPI {
         date: string;
         messages: number;
         calls: number;
-        voiceMinutes: number;
+        webhooks: number;
       }>;
+      days: number;
     }>("GET", `/v1/usage/daily?days=${days}`);
   }
 
@@ -827,8 +822,9 @@ export class AgentPhoneAPI {
         month: string;
         messages: number;
         calls: number;
-        voiceMinutes: number;
+        webhooks: number;
       }>;
+      months: number;
     }>("GET", `/v1/usage/monthly?months=${months}`);
   }
 }

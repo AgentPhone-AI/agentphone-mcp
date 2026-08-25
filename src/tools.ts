@@ -161,10 +161,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
         sections.push(`=== Account Overview ===`);
         if (usage) {
-          sections.push(`Plan: ${usage.plan.name}`);
           sections.push(
             `Phone Numbers: ${usage.numbers.used}/${usage.numbers.limit} used (${usage.numbers.remaining} remaining)`
           );
+        } else {
+          sections.push(`Usage: failed to load.`);
         }
         sections.push(``);
 
@@ -1371,13 +1372,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_usage",
-    "Get account usage statistics. By default returns a summary with plan limits, quotas, and " +
-      "message/call volume. Use breakdown='daily' or 'monthly' for time-series data.",
+    "Get account usage statistics. By default returns a summary with number usage plus " +
+      "message, call, and webhook volume. Use breakdown='daily' or 'monthly' for time-series data.",
     {
       breakdown: z
         .enum(["summary", "daily", "monthly"])
         .default("summary")
-        .describe("'summary' for plan limits and totals, 'daily' for per-day breakdown, 'monthly' for per-month breakdown"),
+        .describe("'summary' for number usage and totals, 'daily' for per-day breakdown, 'monthly' for per-month breakdown"),
       days: z
         .number()
         .min(1)
@@ -1401,7 +1402,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           }
           const formatted = result.data
             .map(
-              (d) => `${d.date}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+              (d) => `${d.date}: ${d.messages} msgs, ${d.calls} calls, ${d.webhooks} webhooks`
             )
             .join("\n");
           return ok(`Daily usage (last ${days} days):\n\n${formatted}`);
@@ -1414,7 +1415,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           }
           const formatted = result.data
             .map(
-              (d) => `${d.month}: ${d.messages} msgs, ${d.calls} calls, ${d.voiceMinutes} voice min`
+              (d) => `${d.month}: ${d.messages} msgs, ${d.calls} calls, ${d.webhooks} webhooks`
             )
             .join("\n");
           return ok(`Monthly usage (last ${months} months):\n\n${formatted}`);
@@ -1423,8 +1424,6 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         // Default: summary
         const result = await api.getUsage();
         const lines = [
-          `Plan: ${result.plan.name}`,
-          ``,
           `Phone Numbers: ${result.numbers.used}/${result.numbers.limit} (${result.numbers.remaining} remaining)`,
           ``,
           `Messages:`,
@@ -1432,6 +1431,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           `  Last 24h: ${result.stats.messagesLast24h}`,
           `  Last 7d: ${result.stats.messagesLast7d}`,
           `  Last 30d: ${result.stats.messagesLast30d}`,
+          `  Billed SMS segments (30d): ${result.stats.smsSegmentsLast30d}`,
           ``,
           `Calls:`,
           `  Total: ${result.stats.totalCalls}`,
@@ -1442,12 +1442,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           `Webhooks:`,
           `  Delivered: ${result.stats.totalWebhookDeliveries} (${result.stats.successfulWebhookDeliveries} ok, ${result.stats.failedWebhookDeliveries} failed)`,
           ``,
-          `Plan Limits:`,
-          `  Max numbers: ${result.plan.limits.numbers}`,
-          `  Messages/month: ${result.plan.limits.messagesPerMonth}`,
-          `  Voice minutes/month: ${result.plan.limits.voiceMinutesPerMonth}`,
-          `  Max call duration: ${result.plan.limits.maxCallDurationMinutes} min`,
-          `  Concurrent calls: ${result.plan.limits.concurrentCalls}`,
+          `Messaging and voice are billed per use from your credit balance (no plan limits).`,
         ];
         return ok(lines.join("\n"));
       } catch (e) {
