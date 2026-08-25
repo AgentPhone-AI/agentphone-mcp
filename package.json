@@ -15,6 +15,7 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
