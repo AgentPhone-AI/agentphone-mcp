@@ -118,7 +118,7 @@ server stores no credentials.
 - **Voice calls** — place outbound calls with built-in AI conversation (no webhook needed) or bring your own webhook
 - **Inbound handling** — set up webhooks to receive and respond to inbound calls and texts in real time
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
-- **Usage & billing** — monitor your plan limits, message/call volume, and daily/monthly breakdowns
+- **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
 ## All Tools (28)
 
@@ -127,7 +127,7 @@ server stores no credentials.
 | Tool | Description |
 |------|-------------|
 | `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage |
-| `get_usage` | Get usage stats, plan limits, and quotas. Use `breakdown` for daily or monthly time-series. |
+| `get_usage` | Get usage stats — number usage, billed SMS segments, and message/call/webhook volume. Use `breakdown` for daily or monthly time-series. |
 
 ### Phone Numbers
 
