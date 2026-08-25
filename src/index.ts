@@ -31,12 +31,15 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 const args = process.argv.slice(2);
 const httpMode = args.includes("--http") || (!args.includes("--stdio") && !!process.env.PORT);
 
-// mcp-use mounts its Inspector with a catch-all GET route unless NODE_ENV is
-// production. Keep the Inspector opt-in for HTTP mode so a platform-provided
-// NODE_ENV cannot accidentally expose it or turn every unknown path into 200
-// HTML. Local developers can set MCP_ENABLE_INSPECTOR=true intentionally.
-if (httpMode && process.env.MCP_ENABLE_INSPECTOR !== "true") {
-  process.env.NODE_ENV = "production";
+// mcp-use controls its Inspector and other development features through
+// NODE_ENV. Let the dedicated Inspector flag take precedence, otherwise honor
+// an explicitly configured environment and use the safe production default.
+if (httpMode) {
+  if (process.env.MCP_ENABLE_INSPECTOR === "true") {
+    process.env.NODE_ENV = "development";
+  } else if (process.env.MCP_ENABLE_INSPECTOR === "false" || !process.env.NODE_ENV) {
+    process.env.NODE_ENV = "production";
+  }
 }
 
 // ---------------------------------------------------------------------------

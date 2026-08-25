@@ -45,9 +45,10 @@ async function startHttpServer(t, environment = {}) {
     PORT: String(port),
     MCP_URL: origin,
     MCP_USE_ANONYMIZED_TELEMETRY: "false",
-    NODE_ENV: "development",
+    NODE_ENV: "production",
   };
   delete env.AGENTPHONE_API_KEY;
+  delete env.MCP_ENABLE_INSPECTOR;
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
   Object.assign(env, environment);
@@ -136,6 +137,39 @@ test("server card reflects self-hosted API-key authentication", async (t) => {
     const card = await response.json();
     assert.equal(card.authentication.required, false);
     assert.deepEqual(card.authentication.schemes, ["bearer"]);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("explicit Inspector opt-in overrides production mode", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t, {
+    MCP_ENABLE_INSPECTOR: "true",
+    NODE_ENV: "production",
+  });
+
+  try {
+    await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+
+    const response = await fetch(`${origin}/inspector`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("HTTP mode preserves an explicit development environment", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t, {
+    NODE_ENV: "development",
+  });
+
+  try {
+    await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+
+    const response = await fetch(`${origin}/inspector`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/);
   } catch (error) {
     throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
   }
