@@ -120,6 +120,7 @@ async function startHttp(): Promise<void> {
     );
   }
   const oauthEnabled = Boolean(clientId && clientSecret);
+  const hasServerApiKey = Boolean(process.env.AGENTPHONE_API_KEY);
 
   const server = new MCPServer({
     name: NAME,
@@ -166,8 +167,8 @@ async function startHttp(): Promise<void> {
         tools: { listChanged: true },
       },
       authentication: {
-        required: true,
-        schemes: ["oauth2", "bearer"],
+        required: oauthEnabled || !hasServerApiKey,
+        schemes: oauthEnabled ? ["oauth2", "bearer"] : ["bearer"],
       },
       tools: ["dynamic"],
     });
