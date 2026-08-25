@@ -16,6 +16,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { AgentPhoneAPI } from "./api.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
@@ -29,6 +30,14 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 // command with a clean env and expect stdio. `--http` / `--stdio` force a mode.
 const args = process.argv.slice(2);
 const httpMode = args.includes("--http") || (!args.includes("--stdio") && !!process.env.PORT);
+
+// mcp-use mounts its Inspector with a catch-all GET route unless NODE_ENV is
+// production. Keep the Inspector opt-in for HTTP mode so a platform-provided
+// NODE_ENV cannot accidentally expose it or turn every unknown path into 200
+// HTML. Local developers can set MCP_ENABLE_INSPECTOR=true intentionally.
+if (httpMode && process.env.MCP_ENABLE_INSPECTOR !== "true") {
+  process.env.NODE_ENV = "production";
+}
 
 // ---------------------------------------------------------------------------
 // stdio transport (default for local clients)
@@ -129,6 +138,39 @@ async function startHttp(): Promise<void> {
           }),
         }
       : {}),
+  });
+
+  // Public, unauthenticated discovery metadata. Server cards are currently a
+  // draft MCP enhancement, so avoid a $schema URL until the proposal publishes
+  // a stable schema. The fields below follow the draft card shape and mirror
+  // the actual initialize response without exposing credentials or user data.
+  server.app.get("/.well-known/mcp/server-card.json", (c: any) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    c.header("Access-Control-Allow-Methods", "GET");
+    c.header("Access-Control-Allow-Headers", "Content-Type");
+    return c.json({
+      version: "1.0",
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+      serverInfo: {
+        name: NAME,
+        title: "AgentPhone MCP Server",
+        version: VERSION,
+      },
+      description: "Give AI agents phone numbers, SMS, and voice calls.",
+      documentationUrl: "https://docs.agentphone.ai/mcp",
+      transport: {
+        type: "streamable-http",
+        endpoint: "/mcp",
+      },
+      capabilities: {
+        tools: { listChanged: true },
+      },
+      authentication: {
+        required: true,
+        schemes: ["oauth2", "bearer"],
+      },
+      tools: ["dynamic"],
+    });
   });
 
   // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
