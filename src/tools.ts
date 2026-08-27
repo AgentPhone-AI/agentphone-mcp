@@ -625,7 +625,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Initiate an outbound, webhook-driven phone call where your backend handles the " +
       "conversation logic.\n\n" +
       "The agent must have a phone number attached and a webhook configured. " +
-      "The call always opens by identifying itself as an AI assistant (added automatically).",
+      "Every call automatically opens with an automated-assistant disclosure (added server-side and not removable).",
     {
       agent_id: z
         .string()
@@ -673,7 +673,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Place a phone call where the AI has an autonomous conversation about a given topic — " +
       "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n\n" +
       "The agent must have a phone number attached.\n" +
-      "Every call opens by identifying itself as an AI assistant (added automatically and " +
+      "Every call automatically opens with an automated-assistant disclosure (added server-side; " +
       "cannot be disabled via topic or initial_greeting).\n" +
       "By default this blocks until the call finishes and returns the full transcript. " +
       "Set wait=false for fire-and-forget.",
@@ -685,8 +685,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
       topic: z.string().describe(
-        "The conversation goal for the AI to pursue. Embedded as the call objective inside a " +
-          "locked system prompt that always enforces AI self-identification (identity rules can't " +
+        "The conversation goal for the assistant to pursue. Embedded as the call objective within " +
+          "locked instructions that always enforce the automated-assistant disclosure (it can't " +
           "be overridden). Be specific about what to discuss and any goals."
       ),
       initial_greeting: z
@@ -931,7 +931,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "update_agent",
-    "Update an agent's configuration — name, description, voice settings, system prompt, greeting, " +
+    "Update an agent's configuration — name, description, voice settings, instructions, greeting, " +
       "call transfer, or voicemail. Only provided fields are updated.\n" +
       "Switching voice_mode to 'hosted' requires a system_prompt.",
     {
@@ -1070,7 +1070,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_agent",
-    "Get details for a specific agent including its phone numbers, voice configuration, and system prompt.",
+    "Get details for a specific agent including its phone numbers, voice configuration, and instructions.",
     {
       agent_id: z.string().describe("The agent ID"),
     },
