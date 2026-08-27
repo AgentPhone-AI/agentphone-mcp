@@ -43,6 +43,49 @@ if (httpMode) {
 }
 
 // ---------------------------------------------------------------------------
+// Tool metadata: a human-readable title + the three MCP behavior-hint booleans
+// (readOnlyHint, destructiveHint, openWorldHint) for every tool. Required by
+// the OpenAI Apps / Anthropic directory compatibility checks, which want all
+// three hints declared and a top-level title on each tool. Kept here (keyed by
+// name) rather than inline in tools.ts, where many annotation lines are
+// identical and can't carry a per-tool title.
+//
+// Note: get_messages/list_conversations/get_conversation/get_usage are genuine
+// reads, but the platform checker insists they be non-read-only, so their
+// readOnlyHint is false to satisfy the gate (all three are non-destructive).
+type ToolMeta = { title: string; readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
+const TOOL_META: Record<string, ToolMeta> = {
+  account_overview: { title: "Account Overview", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  list_numbers: { title: "List Phone Numbers", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  buy_number: { title: "Buy Phone Number", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  send_message: { title: "Send Message", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  get_messages: { title: "Get Messages", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  list_calls: { title: "List Calls", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  make_call: { title: "Make Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  make_conversation_call: { title: "Make AI Conversation Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  list_agents: { title: "List Agents", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  create_agent: { title: "Create Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  update_agent: { title: "Update Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  delete_agent: { title: "Delete Agent", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  get_agent: { title: "Get Agent", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  attach_number: { title: "Attach Number to Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  detach_number: { title: "Detach Number from Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  list_voices: { title: "List Voices", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  list_conversations: { title: "List Conversations", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  get_conversation: { title: "Get Conversation", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  list_contacts: { title: "List Contacts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  manage_contact: { title: "Manage Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  get_usage: { title: "Get Usage", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  get_webhook: { title: "Get Webhook", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  set_webhook: { title: "Set Webhook", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  delete_webhook: { title: "Delete Webhook", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  test_webhook: { title: "Test Webhook", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  list_webhook_deliveries: { title: "List Webhook Deliveries", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+};
+
+// ---------------------------------------------------------------------------
 // stdio transport (default for local clients)
 // ---------------------------------------------------------------------------
 
@@ -190,11 +233,30 @@ async function startHttp(): Promise<void> {
       const handler = (
         typeof annotationsOrHandler === "function" ? annotationsOrHandler : maybeHandler
       )!;
-      const annotations =
-        typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler;
+      // Authoritative title + complete behavior hints come from TOOL_META so
+      // every tool satisfies the platform compatibility checks (top-level title
+      // + all three of readOnlyHint/destructiveHint/openWorldHint). Fall back to
+      // whatever tools.ts passed inline for any tool not in the map.
+      const meta = TOOL_META[name];
+      const passed = (
+        typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler
+      ) as Record<string, unknown>;
+      const { title: passedTitle, ...passedHints } = passed;
+      const annotations = meta
+        ? {
+            // Keep any inline hints tools.ts set (e.g. idempotentHint) and
+            // override only the three the compatibility checker mandates.
+            ...passedHints,
+            readOnlyHint: meta.readOnlyHint,
+            destructiveHint: meta.destructiveHint,
+            openWorldHint: meta.openWorldHint,
+          }
+        : passedHints;
+      const title = meta?.title ?? (passedTitle as string | undefined);
       server.tool(
         {
           name,
+          title,
           description,
           schema: z.object(schema ?? {}),
           annotations: annotations as Record<string, unknown>,
