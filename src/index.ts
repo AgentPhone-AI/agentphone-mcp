@@ -244,6 +244,9 @@ async function startHttp(): Promise<void> {
       const { title: passedTitle, ...passedHints } = passed;
       const annotations = meta
         ? {
+            // Keep any inline hints tools.ts set (e.g. idempotentHint) and
+            // override only the three the compatibility checker mandates.
+            ...passedHints,
             readOnlyHint: meta.readOnlyHint,
             destructiveHint: meta.destructiveHint,
             openWorldHint: meta.openWorldHint,
