@@ -17,6 +17,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { normalizeObjectSchema, safeParseAsync } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { AgentPhoneAPI } from "./api.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
@@ -91,6 +92,60 @@ const TOOL_META: Record<string, ToolMeta> = {
 // stdio transport (default for local clients)
 // ---------------------------------------------------------------------------
 
+/**
+ * Replace the MCP SDK's default input-validation error — a raw, multi-line JSON
+ * dump of Zod issues (`Invalid arguments for tool X: [ { "expected": "string",
+ * "code": "invalid_type", ... } ]`) — with one concise, human-readable
+ * INVALID_PARAMS message. The SDK derives both the advertised tools/list schema
+ * and its validation from the same `tool.inputSchema`, so overriding the
+ * validation method leaves every advertised schema (types, enums, required,
+ * descriptions) untouched and only changes the error text a client sees on bad
+ * arguments.
+ *
+ * We patch the McpServer *prototype* (reached from a live instance) rather than
+ * the instance itself: mcp-use runs a fresh McpServer per HTTP session, so an
+ * instance-level patch on the startup server would never be hit. mcp-use also
+ * loads its own nested copy of the SDK, so we take the prototype off the actual
+ * instance mcp-use handed us instead of importing the class. Guarded so it runs
+ * once per class.
+ */
+function installConciseValidation(nativeServer: unknown): void {
+  if (!nativeServer) return;
+  const proto = Object.getPrototypeOf(nativeServer) as
+    | {
+        validateToolInput?: (tool: any, args: unknown, toolName: string) => Promise<unknown>;
+        __agentphoneConciseValidation?: boolean;
+      }
+    | null;
+  if (!proto || typeof proto.validateToolInput !== "function" || proto.__agentphoneConciseValidation) {
+    return;
+  }
+  proto.__agentphoneConciseValidation = true;
+  proto.validateToolInput = async function (tool: any, args: unknown, toolName: string) {
+    if (!tool?.inputSchema) return undefined;
+    const schemaToParse = normalizeObjectSchema(tool.inputSchema) ?? tool.inputSchema;
+    const result = (await safeParseAsync(schemaToParse, args)) as {
+      success: boolean;
+      data?: unknown;
+      error?: { issues?: Array<{ path?: Array<string | number>; message?: string }> };
+    };
+    if (!result.success) {
+      const issues = result.error?.issues ?? [];
+      const summary =
+        issues
+          .map((i) => `${(i.path ?? []).join(".") || "input"}: ${i.message ?? "invalid value"}`)
+          .join("; ") || "one or more arguments are invalid";
+      // Throw a plain Error, not the SDK's McpError: HTTP sessions run mcp-use's
+      // nested SDK copy, whose `instanceof McpError` wouldn't recognize a class
+      // imported from the top-level copy. Both copies funnel any thrown Error
+      // through the same createToolError path, so a plain Error yields the
+      // concise message as an isError result on every transport.
+      throw new Error(`Invalid arguments for ${toolName}: ${summary}`);
+    }
+    return result.data;
+  };
+}
+
 async function startStdio(): Promise<void> {
   const apiKey = process.env.AGENTPHONE_API_KEY;
   if (!apiKey) {
@@ -102,6 +157,7 @@ async function startStdio(): Promise<void> {
 
   const api = new AgentPhoneAPI(BASE_URL, apiKey);
   const server = new McpServer({ name: NAME, version: VERSION });
+  installConciseValidation(server);
   // McpServer.tool's signature matches ToolRegistrar exactly.
   registerTools(server as unknown as ToolRegistrar, api);
   await server.connect(new StdioServerTransport());
@@ -188,6 +244,13 @@ async function startHttp(): Promise<void> {
         }
       : {}),
   });
+
+  // mcp-use delegates tool validation to the SDK McpServer it wraps
+  // (exposed as `nativeServer` / `server`); swap in concise error messages.
+  installConciseValidation(
+    (server as unknown as { nativeServer?: unknown; server?: unknown }).nativeServer ??
+      (server as unknown as { server?: unknown }).server
+  );
 
   // Public, unauthenticated discovery metadata. Server cards are currently a
   // draft MCP enhancement, so avoid a $schema URL until the proposal publishes
