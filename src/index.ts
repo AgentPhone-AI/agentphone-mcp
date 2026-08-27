@@ -16,7 +16,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { LATEST_PROTOCOL_VERSION, McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { normalizeObjectSchema, safeParseAsync } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { AgentPhoneAPI } from "./api.js";
@@ -133,10 +133,14 @@ function installConciseValidation(nativeServer: unknown): void {
       const issues = result.error?.issues ?? [];
       const summary =
         issues
-          .slice(0, 4)
           .map((i) => `${(i.path ?? []).join(".") || "input"}: ${i.message ?? "invalid value"}`)
           .join("; ") || "one or more arguments are invalid";
-      throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for ${toolName}: ${summary}`);
+      // Throw a plain Error, not the SDK's McpError: HTTP sessions run mcp-use's
+      // nested SDK copy, whose `instanceof McpError` wouldn't recognize a class
+      // imported from the top-level copy. Both copies funnel any thrown Error
+      // through the same createToolError path, so a plain Error yields the
+      // concise message as an isError result on every transport.
+      throw new Error(`Invalid arguments for ${toolName}: ${summary}`);
     }
     return result.data;
   };
