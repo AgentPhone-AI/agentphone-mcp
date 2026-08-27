@@ -109,6 +109,69 @@ const TOOL_META: Record<string, ToolMeta> = {
  * instance mcp-use handed us instead of importing the class. Guarded so it runs
  * once per class.
  */
+/**
+ * Turn a single Zod issue into one plain-English sentence, e.g.
+ * "number_id is required." or "url must be a valid URL." — instead of Zod's
+ * technical phrasing ("Invalid input: expected string, received undefined").
+ * `args` is the original arguments, used to tell a missing field from a
+ * wrong-typed one.
+ */
+function describeValidationIssue(
+  issue: { code?: string; path?: Array<string | number>; message?: string; [k: string]: any },
+  args: unknown
+): string {
+  const path = issue.path ?? [];
+  const field = path.join(".") || "input";
+  const valueAt = (): unknown => {
+    let v: any = args;
+    for (const k of path) {
+      if (v == null) return undefined;
+      v = v[k as any];
+    }
+    return v;
+  };
+  const typeWord = (t: string): string =>
+    ({
+      string: "a string (text)",
+      number: "a number",
+      integer: "a whole number",
+      boolean: "true or false",
+      array: "a list",
+      object: "an object",
+    })[t] ?? `a ${t}`;
+
+  switch (issue.code) {
+    case "invalid_type":
+      return valueAt() === undefined
+        ? `${field} is required`
+        : `${field} must be ${typeWord(String(issue.expected))}`;
+    case "too_small": {
+      const unit = issue.origin === "string" ? " characters" : issue.origin === "array" ? " items" : "";
+      return `${field} must be ${issue.inclusive === false ? "greater than" : "at least"} ${issue.minimum}${unit}`;
+    }
+    case "too_big": {
+      const unit = issue.origin === "string" ? " characters" : issue.origin === "array" ? " items" : "";
+      return `${field} must be ${issue.inclusive === false ? "less than" : "at most"} ${issue.maximum}${unit}`;
+    }
+    case "invalid_format":
+      if (issue.format === "url" || issue.format === "uri") return `${field} must be a valid URL`;
+      if (issue.format === "email") return `${field} must be a valid email address`;
+      return `${field} has an invalid format`;
+    case "invalid_value":
+    case "invalid_enum_value": {
+      const values = (issue.values ?? issue.options) as unknown[] | undefined;
+      return values?.length
+        ? `${field} must be one of: ${values.join(", ")}`
+        : `${field} has an invalid value`;
+    }
+    case "unrecognized_keys":
+      return `unexpected field(s): ${(issue.keys ?? []).join(", ")}`;
+    default:
+      // Fall back to Zod's message, but strip its "Invalid input: " prefix.
+      return `${field}: ${(issue.message ?? "invalid value").replace(/^Invalid input:\s*/i, "")}`;
+  }
+}
+
 function installConciseValidation(nativeServer: unknown): void {
   if (!nativeServer) return;
   const proto = Object.getPrototypeOf(nativeServer) as
@@ -132,9 +195,8 @@ function installConciseValidation(nativeServer: unknown): void {
     if (!result.success) {
       const issues = result.error?.issues ?? [];
       const summary =
-        issues
-          .map((i) => `${(i.path ?? []).join(".") || "input"}: ${i.message ?? "invalid value"}`)
-          .join("; ") || "one or more arguments are invalid";
+        issues.map((i) => describeValidationIssue(i, args)).join("; ") ||
+        "one or more arguments are invalid";
       // Throw a plain Error, not the SDK's McpError: HTTP sessions run mcp-use's
       // nested SDK copy, whose `instanceof McpError` wouldn't recognize a class
       // imported from the top-level copy. Both copies funnel any thrown Error
