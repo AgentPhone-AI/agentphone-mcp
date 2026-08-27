@@ -60,9 +60,10 @@ if (httpMode) {
 //                     account writes (create/update agent, contacts, webhook
 //                     config, conversation metadata) are closed-system → false.
 //   destructiveHint = true only for irreversible effects: sends/transactions
-//                     that can't be undone (buy_number, send_message, calls) and
+//                     that can't be undone (buy_number, send_message, calls),
 //                     deletes (delete_agent, delete_webhook, manage_contact,
-//                     which can delete). Reversible updates → false.
+//                     which can delete), and update_conversation (metadata:null
+//                     clears stored data). Reversible updates → false.
 // Some automated checkers apply a name-based heuristic that (wrongly) flags
 // reads like get_messages as senders; we keep the accurate values above and
 // dispute those flags rather than mislabel behavior.
@@ -87,7 +88,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   list_voices: { title: "List Voices", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_conversations: { title: "List Conversations", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_conversation: { title: "Get Conversation", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   list_contacts: { title: "List Contacts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   manage_contact: { title: "Manage Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   get_usage: { title: "Get Usage", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
