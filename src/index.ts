@@ -147,10 +147,13 @@ function describeValidationIssue(
         : `${field} must be ${typeWord(String(issue.expected))}`;
     case "too_small": {
       const unit = issue.origin === "string" ? " characters" : issue.origin === "array" ? " items" : "";
+      // Zod flags exact:true for .length(n) — report the single required value.
+      if (issue.exact) return `${field} must be exactly ${issue.minimum}${unit}`;
       return `${field} must be ${issue.inclusive === false ? "greater than" : "at least"} ${issue.minimum}${unit}`;
     }
     case "too_big": {
       const unit = issue.origin === "string" ? " characters" : issue.origin === "array" ? " items" : "";
+      if (issue.exact) return `${field} must be exactly ${issue.maximum}${unit}`;
       return `${field} must be ${issue.inclusive === false ? "less than" : "at most"} ${issue.maximum}${unit}`;
     }
     case "invalid_format":
