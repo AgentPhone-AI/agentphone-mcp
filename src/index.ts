@@ -50,18 +50,18 @@ if (httpMode) {
 // name) rather than inline in tools.ts, where many annotation lines are
 // identical and can't carry a per-tool title.
 //
-// Note: the compatibility checker's heuristic treats every tool that is not
-// strictly read-only as a "communication," so it requires destructiveHint and
-// openWorldHint to be true on them (including genuine reads like get_messages,
-// get_conversation, list_conversations, get_usage). We set the hints to what
-// the automated gate demands rather than to their true read/write semantics.
+// Genuine reads (get_messages, list_conversations, get_conversation, get_usage)
+// are marked readOnlyHint:true with destructive/openWorld false — their true
+// semantics. The checker's name-based heuristic can misread "messages"/
+// "conversation" as sending a communication; the accurate answer is that these
+// only fetch. The real writes below carry destructive/openWorld hints.
 type ToolMeta = { title: string; readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
 const TOOL_META: Record<string, ToolMeta> = {
   account_overview: { title: "Account Overview", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_numbers: { title: "List Phone Numbers", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   buy_number: { title: "Buy Phone Number", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   send_message: { title: "Send Message", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-  get_messages: { title: "Get Messages", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  get_messages: { title: "Get Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_calls: { title: "List Calls", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   make_call: { title: "Make Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -74,12 +74,12 @@ const TOOL_META: Record<string, ToolMeta> = {
   attach_number: { title: "Attach Number to Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   detach_number: { title: "Detach Number from Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   list_voices: { title: "List Voices", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  list_conversations: { title: "List Conversations", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-  get_conversation: { title: "Get Conversation", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  list_conversations: { title: "List Conversations", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  get_conversation: { title: "Get Conversation", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   list_contacts: { title: "List Contacts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   manage_contact: { title: "Manage Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-  get_usage: { title: "Get Usage", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  get_usage: { title: "Get Usage", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_webhook: { title: "Get Webhook", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   set_webhook: { title: "Set Webhook", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   delete_webhook: { title: "Delete Webhook", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
