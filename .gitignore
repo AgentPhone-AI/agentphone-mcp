@@ -1,5 +1,8 @@
 node_modules/
-dist/
+# dist/ is committed on purpose: the deploy platform's build cache would not
+# invalidate, shipping a stale compiled dist/. The Dockerfile copies this
+# committed dist/ directly instead of running tsc. Rebuild with `npm run build`
+# and commit dist/ whenever src/ changes.
 *.tsbuildinfo
 .env
 .mcp-use/
