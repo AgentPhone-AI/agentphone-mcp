@@ -367,10 +367,19 @@ async function startHttp(): Promise<void> {
   // defaults to the token issued for the current submission.
   const openaiAppsChallengeToken =
     process.env.OPENAI_APPS_CHALLENGE_TOKEN || "EfVArm1M_V6jkL-9u2Kue5GcTPX-iFYoxqii2unYC-o";
-  server.app.get("/.well-known/openai-apps-challenge", (c: any) => {
-    c.header("Cache-Control", "public, max-age=300");
-    return c.text(openaiAppsChallengeToken);
-  });
+  // mcp-use dispatches custom routes by EXACT path match (method:path), so a
+  // request that arrives with a trailing slash — some proxies append one to
+  // extensionless paths, and the OpenAI Apps verifier does — won't match a
+  // slash-less registration and 404s. Register both variants.
+  for (const p of [
+    "/.well-known/openai-apps-challenge",
+    "/.well-known/openai-apps-challenge/",
+  ]) {
+    server.app.get(p, (c: any) => {
+      c.header("Cache-Control", "public, max-age=300");
+      return c.text(openaiAppsChallengeToken);
+    });
+  }
 
   // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
   // and bind the per-request token.
