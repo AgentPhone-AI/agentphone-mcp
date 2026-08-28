@@ -361,6 +361,17 @@ async function startHttp(): Promise<void> {
     });
   });
 
+  // OpenAI Apps directory domain-verification challenge. The portal checks that
+  // this exact origin serves ONLY the verification token as plain text (no JSON,
+  // no extra tokens). Configurable via env so a rotated token needs no redeploy;
+  // defaults to the token issued for the current submission.
+  const openaiAppsChallengeToken =
+    process.env.OPENAI_APPS_CHALLENGE_TOKEN || "EfVArm1M_V6jkL-9u2Kue5GcTPX-iFYoxqii2unYC-o";
+  server.app.get("/.well-known/openai-apps-challenge", (c: any) => {
+    c.header("Cache-Control", "public, max-age=300");
+    return c.text(openaiAppsChallengeToken);
+  });
+
   // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
   // and bind the per-request token.
   const registrar: ToolRegistrar = {
