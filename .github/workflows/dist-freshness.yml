@@ -1,0 +1,39 @@
+name: dist freshness
+
+# The deploy image copies the committed dist/ instead of running tsc (the deploy
+# platform's build cache would not invalidate and shipped stale code). This job
+# guards the "rebuild and commit dist/ when src/ changes" rule: it recompiles and
+# fails if the committed dist/ differs from a fresh build, so stale dist/ can
+# never merge silently.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "dist/**"
+      - "tsconfig.json"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches: [main]
+
+jobs:
+  check-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Fail if committed dist/ is out of date with src/
+        run: |
+          # Stage first so NEW (untracked) compiled files are caught too, not
+          # just modifications to already-tracked files.
+          git add -A dist/
+          if ! git diff --cached --exit-code -- dist/; then
+            echo "::error::dist/ is stale or missing files. Run 'npm run build' and commit the updated dist/."
+            exit 1
+          fi
