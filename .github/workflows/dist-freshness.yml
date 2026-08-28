@@ -30,7 +30,10 @@ jobs:
       - run: npm run build
       - name: Fail if committed dist/ is out of date with src/
         run: |
-          if ! git diff --exit-code -- dist/; then
-            echo "::error::dist/ is stale. Run 'npm run build' and commit the updated dist/."
+          # Stage first so NEW (untracked) compiled files are caught too, not
+          # just modifications to already-tracked files.
+          git add -A dist/
+          if ! git diff --cached --exit-code -- dist/; then
+            echo "::error::dist/ is stale or missing files. Run 'npm run build' and commit the updated dist/."
             exit 1
           fi
