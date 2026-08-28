@@ -11,6 +11,12 @@ FROM node:20-slim
 WORKDIR /app
 COPY package*.json .npmrc ./
 RUN npm ci --omit=dev
+# Bust the COPY dist/ layer. The platform's remote cache also caches the dist
+# copy, so a changed committed dist/ was shipped stale. Changing this value (or
+# this line) forces the copy to re-run. Pass the git SHA as the build arg for
+# automatic per-commit invalidation.
+ARG DIST_CACHEBUST=2
+RUN echo "dist cachebust ${DIST_CACHEBUST}"
 COPY dist/ dist/
 EXPOSE 3000
 # Force HTTP mode: the image is a self-hosted HTTP server. (Hosted platforms
