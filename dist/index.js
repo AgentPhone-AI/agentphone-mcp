@@ -305,19 +305,21 @@ async function startHttp() {
     // no extra tokens). Configurable via env so a rotated token needs no redeploy;
     // defaults to the token issued for the current submission.
     const openaiAppsChallengeToken = process.env.OPENAI_APPS_CHALLENGE_TOKEN || "EfVArm1M_V6jkL-9u2Kue5GcTPX-iFYoxqii2unYC-o";
-    // mcp-use dispatches custom routes by EXACT path match (method:path), so a
-    // request that arrives with a trailing slash — some proxies append one to
-    // extensionless paths, and the OpenAI Apps verifier does — won't match a
-    // slash-less registration and 404s. Register both variants.
-    for (const p of [
-        "/.well-known/openai-apps-challenge",
-        "/.well-known/openai-apps-challenge/",
-    ]) {
-        server.app.get(p, (c) => {
-            c.header("Cache-Control", "public, max-age=300");
-            return c.text(openaiAppsChallengeToken);
-        });
-    }
+    // Serve the token via app.use, not app.get. mcp-use routes app.get through an
+    // exact-match custom-route map (method:path), which is brittle in prod against
+    // trailing-slash / path normalization; app.use registers a real Hono
+    // middleware that prefix-matches the path (so both `…/openai-apps-challenge`
+    // and `…/openai-apps-challenge/` hit it). It only responds to GET so it never
+    // shadows other methods, and returns a Response to end the chain.
+    const serveChallenge = (c) => {
+        if (c.req.method !== "GET")
+            return c.notFound();
+        c.header("Cache-Control", "public, max-age=300");
+        c.header("Content-Type", "text/plain; charset=utf-8");
+        return c.text(openaiAppsChallengeToken);
+    };
+    server.app.use("/.well-known/openai-apps-challenge", serveChallenge);
+    server.app.use("/.well-known/openai-apps-challenge/", serveChallenge);
     // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
     // and bind the per-request token.
     const registrar = {
