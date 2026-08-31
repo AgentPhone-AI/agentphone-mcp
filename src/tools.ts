@@ -494,7 +494,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "list_calls",
     "List recent calls. Scope by agent_id or number_id, or use status/direction/search to filter globally.\n\n" +
-      "When agent_id or number_id is passed, status/direction/search filters are not applied.\n" +
+      "These are two separate modes and cannot be mixed: status/direction/search apply only to " +
+      "the global list, so combining them with agent_id or number_id is rejected rather than " +
+      "silently returning unfiltered calls. Pass at most one of agent_id or number_id.\n" +
       "Returns call summaries including each call's ID, direction, participants, and status.",
     {
       agent_id: z
@@ -531,6 +533,38 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, number_id, limit, offset, status, direction, search }) => {
+      if (agent_id !== undefined && number_id !== undefined) {
+        return err(
+          new Error(
+            "Pass either agent_id or number_id, not both. Use number_id for one phone number, " +
+              "or agent_id for every number attached to an agent."
+          )
+        );
+      }
+
+      // The agent- and number-scoped endpoints take no filter parameters, so
+      // accepting these here would return every call for that scope and present
+      // it as a filtered result.
+      const scope = number_id ? "number_id" : agent_id ? "agent_id" : null;
+      if (scope) {
+        const ignored = [
+          status !== undefined ? "status" : null,
+          direction !== undefined ? "direction" : null,
+          search !== undefined ? "search" : null,
+        ].filter(Boolean);
+        if (ignored.length > 0) {
+          const names = ignored.join(", ");
+          return err(
+            new Error(
+              `${names} cannot be combined with ${scope}: calls scoped to one ` +
+                `${scope === "number_id" ? "number" : "agent"} can only be listed unfiltered. ` +
+                `Either drop ${names}, or drop ${scope} and filter across all calls instead ` +
+                `(search matches a phone number or keyword).`
+            )
+          );
+        }
+      }
+
       try {
         let result;
         if (number_id) {
