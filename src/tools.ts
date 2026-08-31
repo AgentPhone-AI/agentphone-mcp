@@ -458,7 +458,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "get_messages",
     "Get SMS messages for a specific phone number, identified by its number ID. " +
-      "Returns individual messages rather than grouped conversation threads.",
+      "Returns individual messages rather than grouped conversation threads.\n\n" +
+      "Results are paged: when more messages remain, the reply says so and gives the offset to " +
+      "pass next.",
     {
       number_id: z.string().describe("The ID of the phone number"),
       limit: z
@@ -467,20 +469,35 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .max(200)
         .default(50)
         .describe("Max messages to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of messages to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ number_id, limit }) => {
+    async ({ number_id, limit, offset }) => {
       try {
-        const result = await api.getMessages(number_id, limit);
+        const result = await api.getMessages(number_id, limit, offset);
         if (result.data.length === 0) {
-          return ok("No messages found for this number.");
+          return ok(
+            offset > 0
+              ? `No further messages for this number past offset ${offset}.`
+              : "No messages found for this number."
+          );
         }
 
         const formatted = result.data
           .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
           .join("\n");
 
-        return ok(`${result.data.length} message(s):\n\n${formatted}`);
+        // Without this the caller cannot tell a complete list from a truncated
+        // one, and has no next offset to ask for.
+        const more = result.hasMore
+          ? `\n\nMore messages available — call again with offset=${offset + result.data.length}.`
+          : "";
+
+        return ok(`${result.data.length} message(s):\n\n${formatted}${more}`);
       } catch (e) {
         return err(e);
       }
@@ -793,11 +810,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ limit, offset }) => {
       try {
-        const result = await api.listAgents(limit);
+        const result = await api.listAgents(limit, offset);
         return ok(JSON.stringify(result, null, 2));
       } catch (e) {
         return err(e);
