@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a branch supersedes the run already in flight for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # mcp-use requires ^20.19.0 || >=22.12.0, so Node 18 cannot install this
+        # tree even though package.json still declares engines.node >= 18.
+        # 20 is what the Dockerfile ships (node:20-slim).
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm test` compiles to dist/ first, so this covers the build as well as
+      # the HTTP routing and discovery suites.
+      - name: Build and test
+        run: npm test
+        env:
+          MCP_USE_ANONYMIZED_TELEMETRY: 'false'
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image build has its own npm ci + tsc, which broke repeatedly in the
+      # past without anything catching it before deploy.
+      - name: Build image
+        run: docker build -t agentphone-mcp:ci .
