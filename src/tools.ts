@@ -533,7 +533,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, number_id, limit, offset, status, direction, search }) => {
-      if (agent_id && number_id) {
+      if (agent_id !== undefined && number_id !== undefined) {
         return err(
           new Error(
             "Pass either agent_id or number_id, not both. Use number_id for one phone number, " +
