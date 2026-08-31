@@ -285,11 +285,13 @@ async function startHttp(): Promise<void> {
   // Per-request credential: the framework passes ctx.auth (verified user + raw
   // access token). We stash the token in AsyncLocalStorage so the shared API
   // client forwards the right credential without threading it through 28 tools.
+  //
+  // No AGENTPHONE_API_KEY fallback here: the tool wrapper below resolves the
+  // credential (including the opt-in anonymous fallback) and always runs the
+  // handler inside tokenStore.run, so an empty store means the request was
+  // never authorized and must not silently borrow the server's own key.
   const tokenStore = new AsyncLocalStorage<string>();
-  const api = new AgentPhoneAPI(
-    BASE_URL,
-    () => tokenStore.getStore() || process.env.AGENTPHONE_API_KEY || ""
-  );
+  const api = new AgentPhoneAPI(BASE_URL, () => tokenStore.getStore() ?? "");
 
   const clientId = process.env.MCP_OAUTH_CLIENT_ID;
   const clientSecret = process.env.MCP_OAUTH_CLIENT_SECRET;
@@ -300,7 +302,33 @@ async function startHttp(): Promise<void> {
     );
   }
   const oauthEnabled = Boolean(clientId && clientSecret);
-  const hasServerApiKey = Boolean(process.env.AGENTPHONE_API_KEY);
+  const serverApiKey = process.env.AGENTPHONE_API_KEY;
+  const hasServerApiKey = Boolean(serverApiKey);
+
+  // A request that carries no caller credential is refused rather than falling
+  // back to the server's own AGENTPHONE_API_KEY: that fallback turned any
+  // self-hosted HTTP deployment into an open proxy onto the operator's account
+  // for anyone who could reach the port. Single-tenant setups that genuinely
+  // want one shared key for every caller (a loopback-only endpoint, a private
+  // network) opt in explicitly.
+  const anonymousAccess =
+    !oauthEnabled && hasServerApiKey && process.env.AGENTPHONE_ALLOW_ANONYMOUS === "true";
+  if (anonymousAccess) {
+    console.error(
+      "WARNING: AGENTPHONE_ALLOW_ANONYMOUS=true — every unauthenticated request to this " +
+        "server acts on the AgentPhone account behind AGENTPHONE_API_KEY. Only run this on an " +
+        "endpoint that is not publicly reachable."
+    );
+  }
+
+  const AUTH_REQUIRED_MESSAGE =
+    "Authentication required. Send your AgentPhone API key as an 'Authorization: Bearer <key>' " +
+    "header (get one at https://agentphone.ai)." +
+    (hasServerApiKey
+      ? " This server has an AGENTPHONE_API_KEY configured but will not use it for " +
+        "unauthenticated callers; set AGENTPHONE_ALLOW_ANONYMOUS=true to intentionally run it " +
+        "as a single-tenant endpoint."
+      : "");
 
   const server = new MCPServer({
     name: NAME,
@@ -354,7 +382,9 @@ async function startHttp(): Promise<void> {
         tools: { listChanged: true },
       },
       authentication: {
-        required: oauthEnabled || !hasServerApiKey,
+        // Only an explicit anonymous-access opt-in makes this endpoint usable
+        // without a credential.
+        required: !anonymousAccess,
         schemes: oauthEnabled ? ["oauth2", "bearer"] : ["bearer"],
       },
       tools: ["dynamic"],
@@ -403,8 +433,17 @@ async function startHttp(): Promise<void> {
           annotations: annotations as Record<string, unknown>,
         },
         async (params: unknown, ctx: any) => {
-          const token: string =
-            ctx?.auth?.accessToken || bearerFromHeader() || process.env.AGENTPHONE_API_KEY || "";
+          // Caller-supplied credential only: the OAuth-verified token, or a
+          // Bearer header for the direct-API-key setup. The server's own key is
+          // used only when anonymous access was explicitly enabled.
+          const callerToken: string = ctx?.auth?.accessToken || bearerFromHeader();
+          const token = callerToken || (anonymousAccess ? serverApiKey! : "");
+          if (!token) {
+            return {
+              content: [{ type: "text", text: AUTH_REQUIRED_MESSAGE }],
+              isError: true,
+            } as any;
+          }
           return tokenStore.run(token, () => handler(params as any)) as any;
         }
       );
@@ -413,7 +452,10 @@ async function startHttp(): Promise<void> {
 
   registerTools(registrar, api);
   await server.listen(PORT);
-  console.error(`AgentPhone MCP server listening on port ${PORT} (oauth ${oauthEnabled ? "on" : "off"})`);
+  console.error(
+    `AgentPhone MCP server listening on port ${PORT} (oauth ${oauthEnabled ? "on" : "off"}, ` +
+      `auth ${anonymousAccess ? "anonymous access ENABLED" : "required"})`
+  );
 }
 
 (httpMode ? startHttp() : startStdio()).catch((err) => {

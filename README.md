@@ -60,10 +60,31 @@ Runs locally via `npx` — works with Cursor, Claude Desktop, Windsurf, and Clau
 Run your own HTTP MCP endpoint:
 
 ```bash
-AGENTPHONE_API_KEY=your_api_key npx agentphone-mcp --http --port 3000
+AGENTPHONE_API_KEY=your_api_key PORT=3000 npx agentphone-mcp --http
 ```
 
-Then connect to `http://localhost:3000/mcp`.
+Then connect to `http://localhost:3000/mcp`, sending your key on each request:
+
+```json
+{
+  "mcpServers": {
+    "agentphone": {
+      "type": "streamable-http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer your_api_key_here"
+      }
+    }
+  }
+}
+```
+
+> **The endpoint requires a credential.** Callers must present their own
+> `Authorization: Bearer <key>` — the server will not spend its own
+> `AGENTPHONE_API_KEY` on an unauthenticated request. To run a single-tenant
+> endpoint where every caller shares the server's key, set
+> `AGENTPHONE_ALLOW_ANONYMOUS=true`. Do that only on an endpoint that is not
+> publicly reachable: anyone who can reach the port then controls the account.
 
 ## What Can It Do?
 
@@ -95,8 +116,13 @@ an HTTP server on `PORT` (default 3000), reachable at `/mcp`.
    client opens a browser to sign in at agentphone.ai — no key to paste. Enable
    it by setting `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` (a client
    pre-registered with the AgentPhone AS).
-2. **API key (scripts / single-tenant):** set `AGENTPHONE_API_KEY`. Used as the
-   fallback credential when no OAuth token is present.
+2. **API key (scripts / single-tenant):** the caller sends its own key as
+   `Authorization: Bearer <key>` on each request.
+
+A request carrying no credential is refused. The server's own
+`AGENTPHONE_API_KEY` is never used on behalf of an unauthenticated caller
+unless `AGENTPHONE_ALLOW_ANONYMOUS=true` is set explicitly, which turns the
+endpoint into a shared-key proxy onto that account.
 
 The per-request access token is forwarded to the AgentPhone REST API, so the
 server stores no credentials.
@@ -106,7 +132,8 @@ server stores no credentials.
 | Var | Purpose |
 |-----|---------|
 | `PORT` | HTTP port (default 3000) |
-| `AGENTPHONE_API_KEY` | Fallback API key when OAuth is off |
+| `AGENTPHONE_API_KEY` | The server's own API key. Used for callers only when `AGENTPHONE_ALLOW_ANONYMOUS=true` |
+| `AGENTPHONE_ALLOW_ANONYMOUS` | Set to `true` to let unauthenticated callers share `AGENTPHONE_API_KEY`. Off by default |
 | `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` | Enable OAuth; client pre-registered with the AgentPhone AS |
 | `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
 | `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
@@ -191,7 +218,8 @@ All webhook tools accept an optional `agent_id` — pass it to manage an agent-s
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `AGENTPHONE_API_KEY` | stdio: yes, HTTP: no | Your AgentPhone API key (HTTP mode can use Authorization header instead) |
+| `AGENTPHONE_API_KEY` | stdio: yes, HTTP: no | Your AgentPhone API key. In HTTP mode callers send their own via the `Authorization` header |
+| `AGENTPHONE_ALLOW_ANONYMOUS` | No | HTTP mode. `true` lets unauthenticated callers act as `AGENTPHONE_API_KEY`. Off by default |
 | `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.ai`) |
 | `PORT` | No | Port for HTTP mode (defaults to `3000`, overridden by `--port`) |
 

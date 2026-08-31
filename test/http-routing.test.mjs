@@ -48,6 +48,7 @@ async function startHttpServer(t, environment = {}) {
     NODE_ENV: "production",
   };
   delete env.AGENTPHONE_API_KEY;
+  delete env.AGENTPHONE_ALLOW_ANONYMOUS;
   delete env.MCP_ENABLE_INSPECTOR;
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
@@ -124,9 +125,30 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
   }
 });
 
-test("server card reflects self-hosted API-key authentication", async (t) => {
+test("server card requires authentication when only a server API key is set", async (t) => {
   const { child, logs, origin } = await startHttpServer(t, {
     AGENTPHONE_API_KEY: "test-api-key",
+  });
+
+  try {
+    await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+
+    const response = await fetch(`${origin}/.well-known/mcp/server-card.json`);
+    assert.equal(response.status, 200);
+    const card = await response.json();
+    // A configured AGENTPHONE_API_KEY is the server's own credential, not an
+    // invitation for anonymous callers to spend it.
+    assert.equal(card.authentication.required, true);
+    assert.deepEqual(card.authentication.schemes, ["bearer"]);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("server card reports optional auth only when anonymous access is opted in", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t, {
+    AGENTPHONE_API_KEY: "test-api-key",
+    AGENTPHONE_ALLOW_ANONYMOUS: "true",
   });
 
   try {
