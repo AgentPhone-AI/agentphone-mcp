@@ -99,6 +99,50 @@ const TOOL_META: Record<string, ToolMeta> = {
   list_webhook_deliveries: { title: "List Webhook Deliveries", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
 
+/**
+ * Merge TOOL_META over the annotations a tool declared inline in tools.ts.
+ *
+ * TOOL_META is authoritative for the title and for the three behavior hints the
+ * platform compatibility checks mandate; any other inline hint (e.g.
+ * idempotentHint) is preserved. Tools absent from the map keep exactly what
+ * they passed. Shared by both transports so stdio and HTTP advertise identical
+ * metadata.
+ */
+function resolveToolMeta(
+  name: string,
+  passed: Record<string, unknown>
+): { title?: string; annotations: Record<string, unknown> } {
+  const meta = TOOL_META[name];
+  const { title: passedTitle, ...passedHints } = passed;
+  if (!meta) {
+    return { title: passedTitle as string | undefined, annotations: passedHints };
+  }
+  return {
+    title: meta.title,
+    annotations: {
+      ...passedHints,
+      readOnlyHint: meta.readOnlyHint,
+      destructiveHint: meta.destructiveHint,
+      openWorldHint: meta.openWorldHint,
+    },
+  };
+}
+
+/**
+ * tools.ts registers through the SDK's 4- and 5-arg overloads (annotations are
+ * optional). Normalize both shapes into the handler plus the inline annotations.
+ */
+function splitToolOverload(
+  annotationsOrHandler: Record<string, unknown> | ((args: any) => Promise<any>),
+  maybeHandler?: (args: any) => Promise<any>
+): { handler: (args: any) => Promise<any>; passed: Record<string, unknown> } {
+  const isHandler = typeof annotationsOrHandler === "function";
+  return {
+    handler: (isHandler ? annotationsOrHandler : maybeHandler)!,
+    passed: (isHandler ? {} : annotationsOrHandler) as Record<string, unknown>,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // stdio transport (default for local clients)
 // ---------------------------------------------------------------------------
@@ -234,8 +278,30 @@ async function startStdio(): Promise<void> {
   const api = new AgentPhoneAPI(BASE_URL, apiKey);
   const server = new McpServer({ name: NAME, version: VERSION });
   installConciseValidation(server);
-  // McpServer.tool's signature matches ToolRegistrar exactly.
-  registerTools(server as unknown as ToolRegistrar, api);
+
+  // Adapter: keep tools.ts's SDK-style registration and apply the same
+  // TOOL_META (title + complete behavior hints) the HTTP transport applies.
+  // Registering straight onto McpServer would drop both, leaving the published
+  // npm package advertising no titles and only partial hints.
+  const registrar: ToolRegistrar = {
+    tool(
+      name: string,
+      description: string,
+      schema: Record<string, z.ZodTypeAny>,
+      annotationsOrHandler: Record<string, unknown> | ((args: any) => Promise<any>),
+      maybeHandler?: (args: any) => Promise<any>
+    ): void {
+      const { handler, passed } = splitToolOverload(annotationsOrHandler, maybeHandler);
+      const { title, annotations } = resolveToolMeta(name, passed);
+      server.registerTool(
+        name,
+        { title, description, inputSchema: schema ?? {}, annotations },
+        handler as never
+      );
+    },
+  };
+
+  registerTools(registrar, api);
   await server.connect(new StdioServerTransport());
 }
 
@@ -371,29 +437,11 @@ async function startHttp(): Promise<void> {
       annotationsOrHandler: Record<string, unknown> | ((args: any) => Promise<any>),
       maybeHandler?: (args: any) => Promise<any>
     ): void {
-      const handler = (
-        typeof annotationsOrHandler === "function" ? annotationsOrHandler : maybeHandler
-      )!;
       // Authoritative title + complete behavior hints come from TOOL_META so
       // every tool satisfies the platform compatibility checks (top-level title
-      // + all three of readOnlyHint/destructiveHint/openWorldHint). Fall back to
-      // whatever tools.ts passed inline for any tool not in the map.
-      const meta = TOOL_META[name];
-      const passed = (
-        typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler
-      ) as Record<string, unknown>;
-      const { title: passedTitle, ...passedHints } = passed;
-      const annotations = meta
-        ? {
-            // Keep any inline hints tools.ts set (e.g. idempotentHint) and
-            // override only the three the compatibility checker mandates.
-            ...passedHints,
-            readOnlyHint: meta.readOnlyHint,
-            destructiveHint: meta.destructiveHint,
-            openWorldHint: meta.openWorldHint,
-          }
-        : passedHints;
-      const title = meta?.title ?? (passedTitle as string | undefined);
+      // + all three of readOnlyHint/destructiveHint/openWorldHint).
+      const { handler, passed } = splitToolOverload(annotationsOrHandler, maybeHandler);
+      const { title, annotations } = resolveToolMeta(name, passed);
       server.tool(
         {
           name,
