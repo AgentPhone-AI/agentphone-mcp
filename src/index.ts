@@ -265,6 +265,13 @@ async function verifyTokenAgainstBackend(
   };
 }
 
+// Reaches unauthenticated callers, so it is a fixed string: it must not reveal
+// whether the server holds a key of its own, nor advertise the flag that would
+// share it. Operator-facing guidance is logged at startup instead.
+const AUTH_REQUIRED_MESSAGE =
+  "Authentication required. Send your AgentPhone API key as an 'Authorization: Bearer <key>' " +
+  "header (get one at https://agentphone.ai).";
+
 async function startHttp(): Promise<void> {
   const { MCPServer, oauthProxy, getRequestContext } = await import("mcp-use/server");
 
@@ -311,24 +318,36 @@ async function startHttp(): Promise<void> {
   // for anyone who could reach the port. Single-tenant setups that genuinely
   // want one shared key for every caller (a loopback-only endpoint, a private
   // network) opt in explicitly.
-  const anonymousAccess =
-    !oauthEnabled && hasServerApiKey && process.env.AGENTPHONE_ALLOW_ANONYMOUS === "true";
-  if (anonymousAccess) {
+  const anonymousRequested = process.env.AGENTPHONE_ALLOW_ANONYMOUS === "true";
+  const anonymousAccess = anonymousRequested && !oauthEnabled && hasServerApiKey;
+
+  // The opt-in has two prerequisites, and silently dropping it would leave the
+  // operator believing the endpoint is single-tenant when it still rejects
+  // every anonymous call. Say which prerequisite is missing.
+  if (anonymousRequested && !anonymousAccess) {
+    console.error(
+      `AGENTPHONE_ALLOW_ANONYMOUS=true ignored: ${
+        oauthEnabled
+          ? "OAuth is configured and takes precedence, so every caller signs in through the " +
+            "authorization server. Unset MCP_OAUTH_CLIENT_ID/MCP_OAUTH_CLIENT_SECRET to run a " +
+            "single-tenant endpoint instead."
+          : "no AGENTPHONE_API_KEY is set, so there is no credential to share."
+      } Unauthenticated requests are rejected.`
+    );
+  } else if (anonymousAccess) {
     console.error(
       "WARNING: AGENTPHONE_ALLOW_ANONYMOUS=true — every unauthenticated request to this " +
         "server acts on the AgentPhone account behind AGENTPHONE_API_KEY. Only run this on an " +
         "endpoint that is not publicly reachable."
     );
+  } else if (hasServerApiKey && !oauthEnabled) {
+    // Otherwise a key set purely out of habit looks like it is doing something.
+    console.error(
+      "Note: AGENTPHONE_API_KEY is set but is not used on behalf of unauthenticated callers. " +
+        "Each caller must send its own 'Authorization: Bearer <key>'. Set " +
+        "AGENTPHONE_ALLOW_ANONYMOUS=true to share the server's key with every caller."
+    );
   }
-
-  const AUTH_REQUIRED_MESSAGE =
-    "Authentication required. Send your AgentPhone API key as an 'Authorization: Bearer <key>' " +
-    "header (get one at https://agentphone.ai)." +
-    (hasServerApiKey
-      ? " This server has an AGENTPHONE_API_KEY configured but will not use it for " +
-        "unauthenticated callers; set AGENTPHONE_ALLOW_ANONYMOUS=true to intentionally run it " +
-        "as a single-tenant endpoint."
-      : "");
 
   const server = new MCPServer({
     name: NAME,

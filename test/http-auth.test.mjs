@@ -153,6 +153,13 @@ test("unauthenticated tool call does not borrow the server's API key", async (t)
 
     assert.equal(result.isError, true, `expected refusal, got ${JSON.stringify(result)}`);
     assert.match(result.content[0].text, /Authentication required/i);
+    // The refusal goes to an unauthenticated caller, so it must not disclose
+    // whether the server holds a key, nor name the flag that would share it.
+    assert.doesNotMatch(
+      result.content[0].text,
+      /AGENTPHONE_API_KEY|ALLOW_ANONYMOUS/,
+      "refusal must not reflect server configuration"
+    );
     // The decisive assertion: nothing reached the AgentPhone API at all.
     assert.deepEqual(backend.seen(), []);
   } catch (error) {
@@ -175,6 +182,50 @@ test("a caller-supplied key is forwarded instead of the server's own", async (t)
     const requests = backend.seen();
     assert.equal(requests.length, 1);
     assert.equal(requests[0].authorization, "Bearer caller-key");
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("anonymous opt-in is refused and reported when OAuth takes precedence", async (t) => {
+  const backend = await startStubBackend(t);
+  const { origin, logs } = await startHttpServer(t, {
+    AGENTPHONE_API_KEY: "server-side-secret",
+    AGENTPHONE_ALLOW_ANONYMOUS: "true",
+    MCP_OAUTH_CLIENT_ID: "test-client",
+    MCP_OAUTH_CLIENT_SECRET: "test-secret",
+    AGENTPHONE_BASE_URL: backend.origin,
+  });
+
+  try {
+    // The card must not advertise an open endpoint just because the flag is set.
+    const card = await (await fetch(`${origin}/.well-known/mcp/server-card.json`)).json();
+    assert.equal(card.authentication.required, true);
+
+    // OAuth rejects the unauthenticated call before it can reach a tool.
+    const challenge = await fetch(`${origin}/mcp`);
+    assert.equal(challenge.status, 401);
+    assert.deepEqual(backend.seen(), []);
+
+    // And the operator is told the flag did nothing, rather than it being
+    // dropped silently.
+    assert.match(logs(), /AGENTPHONE_ALLOW_ANONYMOUS=true ignored/);
+    assert.match(logs(), /OAuth is configured and takes precedence/);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("anonymous opt-in without a server key is reported, not silently dropped", async (t) => {
+  const { origin, logs } = await startHttpServer(t, {
+    AGENTPHONE_ALLOW_ANONYMOUS: "true",
+  });
+
+  try {
+    const card = await (await fetch(`${origin}/.well-known/mcp/server-card.json`)).json();
+    assert.equal(card.authentication.required, true);
+    assert.match(logs(), /AGENTPHONE_ALLOW_ANONYMOUS=true ignored/);
+    assert.match(logs(), /no AGENTPHONE_API_KEY is set/);
   } catch (error) {
     throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
   }
