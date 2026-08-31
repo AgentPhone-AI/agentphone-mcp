@@ -126,8 +126,13 @@ jobs:
           docker cp "$cid:/app/dist" ./image-dist
           docker rm "$cid" > /dev/null
 
-          ( cd dist && find . -name '*.js' | sort | xargs sha256sum ) > source-build.sums
-          ( cd image-dist && find . -name '*.js' | sort | xargs sha256sum ) > image-build.sums
+          # Hash every emitted file, not just *.js. tsconfig enables
+          # declaration, declarationMap and sourceMap, so tsc emits .d.ts,
+          # .d.ts.map and .js.map alongside each module. A type-only source
+          # change leaves .js byte-identical while the declarations differ, so
+          # a .js-only comparison would report a stale image as current.
+          ( cd dist && find . -type f | sort | xargs sha256sum ) > source-build.sums
+          ( cd image-dist && find . -type f | sort | xargs sha256sum ) > image-build.sums
 
           if ! diff -u source-build.sums image-build.sums; then
             echo "::error::The image's dist/ does not match a fresh build of src/ — the image is shipping stale or unexpected code."
