@@ -481,9 +481,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         const result = await api.getMessages(number_id, limit, offset);
         if (result.data.length === 0) {
           return ok(
-            offset > 0
-              ? `No further messages for this number past offset ${offset}.`
-              : "No messages found for this number."
+            !result.hasMore
+              ? (offset > 0
+                  ? `No further messages for this number past offset ${offset}.`
+                  : "No messages found for this number.")
+              : `No messages in this page — call again with offset=${offset}.`
           );
         }
 
