@@ -103,7 +103,7 @@ export class AgentPhoneAPI {
 
   // --- SMS / Messages ---
 
-  async getMessages(numberId: string, limit = 50) {
+  async getMessages(numberId: string, limit = 50, offset = 0) {
     return this.request<{
       data: Array<{
         id: string;
@@ -113,7 +113,10 @@ export class AgentPhoneAPI {
         receivedAt: string;
       }>;
       hasMore: boolean;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}`);
+    }>(
+      "GET",
+      `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}&offset=${offset}`
+    );
   }
 
   async sendMessage(params: {
