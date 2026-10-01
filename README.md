@@ -93,8 +93,12 @@ an HTTP server on `PORT` (default 3000), reachable at `/mcp`.
 1. **OAuth (recommended for end users):** the framework proxies an
    Authorization Code + PKCE flow to the AgentPhone authorization server, so the
    client opens a browser to sign in at agentphone.ai — no key to paste. Enable
-   it by setting `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` (a client
-   pre-registered with the AgentPhone AS).
+   it by setting `MCP_OAUTH_CLIENT_ID` (a client pre-registered with the
+   AgentPhone AS). `MCP_OAUTH_CLIENT_SECRET` is optional: set it to run the
+   gateway as a confidential client, or leave it unset to run as a **public
+   client** (the gateway must then be registered with
+   `token_endpoint_auth_method=none`). Public mode advertises `none` to
+   downstream clients, which strict OAuth clients require.
 2. **API key (scripts / single-tenant):** set `AGENTPHONE_API_KEY`. Used as the
    fallback credential when no OAuth token is present.
 
@@ -107,7 +111,8 @@ server stores no credentials.
 |-----|---------|
 | `PORT` | HTTP port (default 3000) |
 | `AGENTPHONE_API_KEY` | Fallback API key when OAuth is off |
-| `MCP_OAUTH_CLIENT_ID` / `MCP_OAUTH_CLIENT_SECRET` | Enable OAuth; client pre-registered with the AgentPhone AS |
+| `MCP_OAUTH_CLIENT_ID` | Enable OAuth; a gateway client pre-registered with the AgentPhone AS |
+| `MCP_OAUTH_CLIENT_SECRET` | Optional. Set = confidential gateway; unset = public client (gateway registered with `token_endpoint_auth_method=none`, advertises `none` downstream) |
 | `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
 | `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
 

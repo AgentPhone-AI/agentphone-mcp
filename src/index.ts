@@ -301,6 +301,18 @@ async function startHttp(): Promise<void> {
   // secret. OAuth only needs a client_id to be enabled.
   const clientSecret = process.env.MCP_OAUTH_CLIENT_SECRET;
   const oauthEnabled = Boolean(clientId);
+  if (clientSecret && !clientId) {
+    console.error(
+      "MCP_OAUTH_CLIENT_SECRET is set but MCP_OAUTH_CLIENT_ID is missing; OAuth is disabled."
+    );
+  } else if (oauthEnabled && !clientSecret) {
+    // Make the mode flip visible in otherwise-silent self-host deployments.
+    console.error(
+      'OAuth enabled in PUBLIC-client mode (no MCP_OAUTH_CLIENT_SECRET): advertising ' +
+        'token_endpoint_auth_method "none". The gateway client must be registered at the ' +
+        "AgentPhone AS with token_endpoint_auth_method=none."
+    );
+  }
   const hasServerApiKey = Boolean(process.env.AGENTPHONE_API_KEY);
 
   const server = new MCPServer({
