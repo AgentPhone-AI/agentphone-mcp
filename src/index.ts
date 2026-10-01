@@ -292,14 +292,15 @@ async function startHttp(): Promise<void> {
   );
 
   const clientId = process.env.MCP_OAUTH_CLIENT_ID;
+  // Secret is optional: when the gateway client is registered as a PUBLIC client
+  // (token_endpoint_auth_method "none") the proxy authenticates to the backend
+  // with PKCE alone. Leaving it set keeps the gateway confidential. Crucially,
+  // when unset, mcp-use advertises token_endpoint_auth_method "none" to
+  // downstream DCR clients — strict clients (e.g. Vercel Connect) reject the
+  // "client_secret_post" that mcp-use otherwise advertises without issuing a
+  // secret. OAuth only needs a client_id to be enabled.
   const clientSecret = process.env.MCP_OAUTH_CLIENT_SECRET;
-  if (Boolean(clientId) !== Boolean(clientSecret)) {
-    console.error(
-      "Both MCP_OAUTH_CLIENT_ID and MCP_OAUTH_CLIENT_SECRET must be set to enable OAuth; " +
-        "partial config ignored, OAuth disabled."
-    );
-  }
-  const oauthEnabled = Boolean(clientId && clientSecret);
+  const oauthEnabled = Boolean(clientId);
   const hasServerApiKey = Boolean(process.env.AGENTPHONE_API_KEY);
 
   const server = new MCPServer({
@@ -313,7 +314,7 @@ async function startHttp(): Promise<void> {
             tokenEndpoint: `${BASE_URL}/oauth/token`,
             issuer: process.env.AGENTPHONE_OAUTH_ISSUER || BASE_URL,
             clientId: clientId!,
-            clientSecret: clientSecret!,
+            ...(clientSecret ? { clientSecret } : {}),
             scopes: ["mcp"],
             verifyToken: verifyTokenAgainstBackend,
           }),
