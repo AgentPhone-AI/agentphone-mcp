@@ -25,12 +25,23 @@ import { registerTools, type ToolRegistrar } from "./tools.js";
 const NAME = "agentphone";
 const VERSION = "0.7.0";
 const BASE_URL = (process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.ai").replace(/\/$/, "");
-const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Hosted platforms (Manufact, etc.) set PORT. Local MCP clients launch the bare
 // command with a clean env and expect stdio. `--http` / `--stdio` force a mode.
 const args = process.argv.slice(2);
 const httpMode = args.includes("--http") || (!args.includes("--stdio") && !!process.env.PORT);
+const portIndex = args.findIndex((arg) => arg === "--port" || arg.startsWith("--port="));
+const portValue = portIndex === -1
+  ? process.env.PORT || "3000"
+  : args[portIndex].startsWith("--port=")
+    ? args[portIndex].slice("--port=".length)
+    : args[portIndex + 1];
+const PORT = Number(portValue);
+if (httpMode && (!portValue || !/^\d+$/.test(portValue) || !Number.isInteger(PORT) || PORT < 1 || PORT > 65535)) {
+  console.error("Invalid port: expected an integer between 1 and 65535 (--port or PORT).");
+  process.exit(1);
+}
+
 
 // mcp-use controls its Inspector and other development features through
 // NODE_ENV. Let the dedicated Inspector flag take precedence, otherwise honor
