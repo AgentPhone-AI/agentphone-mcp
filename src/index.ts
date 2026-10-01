@@ -234,7 +234,7 @@ function installConciseValidation(nativeServer: unknown): void {
 }
 
 async function startStdio(): Promise<void> {
-  const apiKey = process.env.AGENTPHONE_API_KEY;
+  const apiKey = process.env.AGENTPHONE_API_KEY?.trim();
   if (!apiKey) {
     console.error("AGENTPHONE_API_KEY environment variable is required for stdio mode");
     process.exit(1);
@@ -293,28 +293,23 @@ async function verifyTokenAgainstBackend(
 async function startHttp(): Promise<void> {
   const { MCPServer, oauthProxy, getRequestContext } = await import("mcp-use/server");
 
-  // Extract a Bearer token from the raw request when OAuth isn't configured.
-  // ctx.auth is only populated by the OAuth proxy flow; for the documented
-  // direct-API-key setup (Authorization: Bearer <key>, no OAuth), we must read
-  // the header ourselves or every call falls back to "" and 401s.
-  const bearerFromHeader = (): string => {
+  // Preserve header presence: malformed credentials must never be treated as
+  // an anonymous request and replaced with the server's credential. null means
+  // the request context is unavailable; only undefined means a missing header.
+  const authorizationHeader = (): string | undefined | null => {
     try {
       const c: any = getRequestContext();
-      const raw: string = c?.req?.header?.("authorization") ?? "";
-      return raw.toLowerCase().startsWith("bearer ") ? raw.slice(7).trim() : "";
+      if (typeof c?.req?.header !== "function") return null;
+      return c.req.header("authorization");
     } catch {
-      return "";
+      return null;
     }
   };
 
-  // Per-request credential: the framework passes ctx.auth (verified user + raw
-  // access token). We stash the token in AsyncLocalStorage so the shared API
-  // client forwards the right credential without threading it through 28 tools.
+  // Only the tool-call boundary chooses credentials. The shared API client
+  // must not independently fall back to the server's account.
   const tokenStore = new AsyncLocalStorage<string>();
-  const api = new AgentPhoneAPI(
-    BASE_URL,
-    () => tokenStore.getStore() || process.env.AGENTPHONE_API_KEY || ""
-  );
+  const api = new AgentPhoneAPI(BASE_URL, () => tokenStore.getStore() || "");
 
   const clientId = process.env.MCP_OAUTH_CLIENT_ID;
   // Secret is optional: when the gateway client is registered as a PUBLIC client
@@ -338,7 +333,27 @@ async function startHttp(): Promise<void> {
         "AgentPhone AS with token_endpoint_auth_method=none."
     );
   }
-  const hasServerApiKey = Boolean(process.env.AGENTPHONE_API_KEY);
+  const serverApiKey = process.env.AGENTPHONE_API_KEY?.trim() || "";
+  const hasServerApiKey = Boolean(serverApiKey);
+  // Without OAuth, a request that carries no Bearer token used to fall back to
+  // the server's own AGENTPHONE_API_KEY, so anyone who could reach the port got
+  // the whole account (calls, SMS, number purchases, agent deletion). That is
+  // now opt-in: set AGENTPHONE_ALLOW_ANONYMOUS=true to restore it for a
+  // single-tenant deployment you have deliberately put behind your own auth.
+  const anonymousRequested = process.env.AGENTPHONE_ALLOW_ANONYMOUS === "true";
+  const allowAnonymous = !oauthEnabled && anonymousRequested;
+  if (anonymousRequested && oauthEnabled) {
+    console.error("AGENTPHONE_ALLOW_ANONYMOUS is ignored because OAuth is enabled; caller authentication is required.");
+  } else if (allowAnonymous && !hasServerApiKey) {
+    console.error("AGENTPHONE_ALLOW_ANONYMOUS requires a non-empty AGENTPHONE_API_KEY; caller authentication is required.");
+  } else if (hasServerApiKey && !allowAnonymous) {
+    console.error("AGENTPHONE_API_KEY is not used for HTTP callers; each request must provide its own bearer credential.");
+  } else if (allowAnonymous && hasServerApiKey) {
+    console.error(
+      "AGENTPHONE_ALLOW_ANONYMOUS=true: requests with no Authorization header will use the " +
+        "server's AGENTPHONE_API_KEY. Anyone who can reach this port can act as this account."
+    );
+  }
 
   const server = new MCPServer({
     name: NAME,
@@ -392,7 +407,7 @@ async function startHttp(): Promise<void> {
         tools: { listChanged: true },
       },
       authentication: {
-        required: oauthEnabled || !hasServerApiKey,
+        required: oauthEnabled || !(hasServerApiKey && allowAnonymous),
         schemes: oauthEnabled ? ["oauth2", "bearer"] : ["bearer"],
       },
       tools: ["dynamic"],
@@ -441,8 +456,24 @@ async function startHttp(): Promise<void> {
           annotations: annotations as Record<string, unknown>,
         },
         async (params: unknown, ctx: any) => {
-          const token: string =
-            ctx?.auth?.accessToken || bearerFromHeader() || process.env.AGENTPHONE_API_KEY || "";
+          const header = authorizationHeader();
+          const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
+          const token: string = oauthEnabled
+            ? ctx?.auth?.accessToken || ""
+            : bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
+          if (!token) {
+            // Fail closed. Never let an unauthenticated caller borrow the
+            // server's credential by accident.
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Unauthorized: send `Authorization: Bearer <AgentPhone API key>` with each request.",
+                },
+              ],
+              isError: true,
+            } as any;
+          }
           return tokenStore.run(token, () => handler(params as any)) as any;
         }
       );
