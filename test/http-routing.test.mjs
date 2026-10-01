@@ -193,7 +193,7 @@ for (const value of ["", "abc", "0", "65536", "3.5", "3000oops"]) {
     });
     let stderr = "";
     child.stderr.on("data", (chunk) => (stderr += chunk));
-    const [code] = await once(child, "exit");
+    const [code] = await once(child, "close");
     assert.equal(code, 1);
     assert.match(stderr, /Invalid port/);
   });
