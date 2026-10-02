@@ -41,7 +41,7 @@ function harness(apiStub = {}) {
   };
 }
 
-const SECRET = "whsec_0123456789abcdefghijklmnop";
+const SECRET = "whsec_test_fixture_not_a_real_secret";
 const WEBHOOK = {
   id: "wh_1",
   url: "https://example.com/hook",

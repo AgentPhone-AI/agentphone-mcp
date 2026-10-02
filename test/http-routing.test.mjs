@@ -54,6 +54,8 @@ async function startHttpServer(t, environment = {}, args = []) {
   delete env.AGENTPHONE_API_KEY;
   delete env.AGENTPHONE_ALLOW_ANONYMOUS;
   delete env.AGENTPHONE_BASE_URL;
+  delete env.AGENTPHONE_OAUTH_AUTHORIZE;
+  delete env.AGENTPHONE_OAUTH_ISSUER;
   delete env.MCP_ENABLE_INSPECTOR;
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
