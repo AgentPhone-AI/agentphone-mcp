@@ -836,11 +836,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Voice ID for the agent. Defaults to 'Skylar - Friendly Guide'."),
       model_tier: z
-        .enum(["turbo", "balanced", "max"])
+        .enum(["turbo", "balanced", "max", "realtime"])
         .optional()
         .describe(
           "Model quality/speed tier for hosted-mode agents. " +
-            "'turbo' = fastest/cheapest, 'balanced' (default) = general use, 'max' = highest quality."
+            "'turbo' = fastest/cheapest, 'balanced' (default) = general use, 'max' = highest quality, 'realtime' = speech-to-speech, lowest latency."
         ),
       transfer_number: z
         .string()
@@ -955,11 +955,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Voice ID for the agent."),
       model_tier: z
-        .enum(["turbo", "balanced", "max"])
+        .enum(["turbo", "balanced", "max", "realtime"])
         .optional()
         .describe(
           "Model quality/speed tier for hosted-mode agents. " +
-            "'turbo' = fastest/cheapest, 'balanced' = general use, 'max' = highest quality."
+            "'turbo' = fastest/cheapest, 'balanced' = general use, 'max' = highest quality, 'realtime' = speech-to-speech, lowest latency."
         ),
       transfer_number: z
         .string()
