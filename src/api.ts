@@ -508,7 +508,7 @@ export class AgentPhoneAPI {
     if (params.length) path += `?${params.join("&")}`;
 
     const fetchTimeout = opts?.wait
-      ? (opts.timeout ?? GET_CALL_MAX_WAIT_SECONDS) * 1000 + LONG_POLL_GRACE_MS
+      ? (opts.timeout || GET_CALL_MAX_WAIT_SECONDS) * 1000 + LONG_POLL_GRACE_MS
       : undefined;
 
     return this.request<{
