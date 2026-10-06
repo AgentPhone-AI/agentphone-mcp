@@ -36,6 +36,19 @@ export interface ToolRegistrar {
   ): void;
 }
 
+/**
+ * Webhook signing secrets only exist to verify signatures on the receiving
+ * server. Tool output lands in model context, chat transcripts and client logs,
+ * so by default we preserve only its conventional type prefix.
+ */
+function maskSecret(secret: string): string {
+  if (!secret) return secret;
+  // Preserve only the conventional, non-secret type prefix. Never expose
+  // arbitrary secret bytes or its length, including for short secrets.
+  const prefix = secret.startsWith("whsec_") && secret.length > 6 ? "whsec_" : "";
+  return `${prefix}•••••• (masked; pass reveal_secret=true to show it)`;
+}
+
 function ok(text: string): ToolResult {
   return { content: [{ type: "text", text }] };
 }
@@ -49,7 +62,7 @@ function err(error: unknown): ToolResult {
         hint = " Request timed out — retry, or pass a longer timeout if the tool supports one.";
         break;
       case 401:
-        hint = " Check your AGENTPHONE_API_KEY.";
+        hint = " The supplied credential was rejected. Check the bearer token (HTTP) or AGENTPHONE_API_KEY (stdio).";
         break;
       case 404:
         if (error.path.includes("/agents/"))
@@ -97,11 +110,9 @@ function validateAreaCode(code: string): string | null {
   return null;
 }
 
-// Mandatory AI self-identification for calls placed through this MCP connector.
-// Enforced here in the connector so the MCP client cannot omit or override it via
-// topic / initial_greeting — the disclosure is always spoken first, and the
-// system prompt is locked so the agent keeps identifying as an AI if asked.
-// (Applies only to MCP-originated calls; the AgentPhone API/SDK are untouched.)
+// This connector adds AI self-identification to the submitted greeting and
+// instructions. It does not control backend playback or guarantee model behavior.
+// Calls made outside this connector do not receive these additions from it.
 const AI_DISCLOSURE =
   "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
 const AI_DISCLOSURE_SYSTEM =
@@ -109,16 +120,15 @@ const AI_DISCLOSURE_SYSTEM =
   "You must clearly identify yourself as an AI at the very start of the call and again any time " +
   "you are asked. Never claim or imply that you are a human.";
 
-/** Force the AI disclosure to lead the spoken greeting, keeping any caller text after it. */
+/** Prefix the submitted greeting with the disclosure, keeping caller text after it. */
 function withDisclosure(greeting?: string): string {
   const extra = (greeting ?? "").trim();
   return extra ? `${AI_DISCLOSURE} ${extra}` : AI_DISCLOSURE;
 }
 
 /**
- * Build the system prompt so the caller-supplied topic can't override the AI
- * identity rules: the immutable rules come first, the topic is framed as
- * subordinate user input, and the rule is re-asserted last (last word wins).
+ * Place identity instructions before and after the caller-supplied topic.
+ * This is a prompt boundary, not a guarantee of model compliance.
  */
 function lockedSystemPrompt(topic: string): string {
   return (
@@ -340,12 +350,14 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "iMessage extras (silently ignored on SMS): reply_to_message_id threads the reply under an " +
       "earlier message, and send_style adds an expressive screen/bubble effect.\n" +
       "To react to a message instead of sending one, set reaction and react_to_message_id " +
-      "(iMessage only); to_number and body are not needed in that case.",
+      "(iMessage only). Reactions cannot select a sender through this connector. Non-empty " +
+      "message, media, recipient, sender or send-option fields are rejected; use a separate " +
+      "call to send a message.",
     {
       agent_id: z
         .string()
         .optional()
-        .describe("The agent ID to send from (the agent must have a phone number attached). Optional if you pass from_number or number_id instead."),
+        .describe("The agent ID to send a message from (must have a phone number attached). Optional with from_number or number_id; omit for reactions."),
       to_number: z
         .string()
         .optional()
@@ -367,11 +379,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       number_id: z
         .string()
         .optional()
-        .describe("Specific phone number ID to send from (if agent has multiple numbers)"),
+        .describe("Specific phone number ID to send a message from (if agent has multiple numbers). Omit for reactions."),
       from_number: z
         .string()
         .optional()
-        .describe("Exact number to send from in E.164 format (alternative to number_id)"),
+        .describe("Exact number to send a message from in E.164 format (alternative to number_id). Omit for reactions."),
       reply_to_message_id: z
         .string()
         .optional()
@@ -395,9 +407,34 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     { openWorldHint: true },
     async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, react_to_message_id, reaction }) => {
       // Reaction mode: react to an existing message instead of sending one.
+      // A reaction and a message in the same call used to run the reaction and
+      // drop the message without a word. Refuse the combination instead.
+      if (react_to_message_id && !reaction) {
+        return err(new Error("react_to_message_id requires reaction (the tapback or emoji to apply)."));
+      }
       if (reaction) {
         if (!react_to_message_id) {
           return err(new Error("reaction requires react_to_message_id (the message to react to)."));
+        }
+        const conflicting = [
+          to_number ? "to_number" : null,
+          body ? "body" : null,
+          media_url ? "media_url" : null,
+          media_urls?.length ? "media_urls" : null,
+          reply_to_message_id ? "reply_to_message_id" : null,
+          send_style ? "send_style" : null,
+          agent_id ? "agent_id" : null,
+          number_id ? "number_id" : null,
+          from_number ? "from_number" : null,
+        ].filter((f): f is string => f !== null);
+        if (conflicting.length) {
+          return err(
+            new Error(
+              `A reaction cannot be combined with ${conflicting.join(", ")}. A reaction is applied to ` +
+                "react_to_message_id and sends no message. This connector cannot select a sender " +
+                "for reactions. Omit sender fields and make separate calls to react and send."
+            )
+          );
         }
         try {
           const r = await api.sendReaction(react_to_message_id, reaction);
@@ -625,7 +662,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Initiate an outbound, webhook-driven phone call where your backend handles the " +
       "conversation logic.\n\n" +
       "The agent must have a phone number attached and a webhook configured. " +
-      "Every call automatically opens with an automated-assistant disclosure (added server-side and not removable).",
+      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API; " +
+      "no tool argument disables that prefix. Calls made directly through the AgentPhone API or SDKs " +
+      "bypass this connector's disclosure logic.",
     {
       agent_id: z
         .string()
@@ -673,8 +712,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Place a phone call where the AI has an autonomous conversation about a given topic — " +
       "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n\n" +
       "The agent must have a phone number attached.\n" +
-      "Every call automatically opens with an automated-assistant disclosure (added server-side; " +
-      "cannot be disabled via topic or initial_greeting).\n" +
+      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API " +
+      "and adds AI identity instructions around the topic. No tool argument disables these additions, " +
+      "but they do not guarantee the model's behavior. Calls made directly through the AgentPhone API " +
+      "or SDKs bypass this connector's disclosure logic.\n" +
       "By default this blocks until the call finishes and returns the full transcript. " +
       "Set wait=false for fire-and-forget.",
     {
@@ -686,13 +727,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("Recipient phone number in E.164 format (e.g. +14155551234)"),
       topic: z.string().describe(
         "The conversation goal for the assistant to pursue. Embedded as the call objective within " +
-          "locked instructions that always enforce the automated-assistant disclosure (it can't " +
-          "be overridden). Be specific about what to discuss and any goals."
+          "connector-supplied AI identity instructions. These instructions guide the model; they do " +
+          "not guarantee its behavior. Be specific about what to discuss and any goals."
       ),
       initial_greeting: z
         .string()
         .optional()
-        .describe("What the AI says when the call connects. If not set, the AI will generate one from the topic."),
+        .describe("Text appended after the connector’s AI disclosure in the greeting sent to the API. If omitted, only the disclosure is sent."),
       wait: z
         .boolean()
         .default(true)
@@ -877,7 +918,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       ambient_sound: z
         .enum(["none", "office", "coffee-shop", "outdoor"])
         .optional()
-        .describe("Optional background ambience for call audio. Not a substitute for the AI self-identification, which is always disclosed."),
+        .describe("Optional background ambience for call audio. Not a substitute for AI self-identification; this connector adds disclosure only to outbound calls placed through its call tools."),
       denoising_mode: z
         .enum(["noise-cancellation", "noise-and-background-speech-cancellation"])
         .optional()
@@ -996,7 +1037,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       ambient_sound: z
         .enum(["none", "office", "coffee-shop", "outdoor"])
         .optional()
-        .describe("Optional background ambience for call audio. Not a substitute for the AI self-identification, which is always disclosed."),
+        .describe("Optional background ambience for call audio. Not a substitute for AI self-identification; this connector adds disclosure only to outbound calls placed through its call tools."),
       denoising_mode: z
         .enum(["noise-cancellation", "noise-and-background-speech-cancellation"])
         .optional()
@@ -1468,9 +1509,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Agent ID to get that agent's webhook. Omit for project-level webhook."),
+      reveal_secret: z
+        .boolean()
+        .default(false)
+        .describe("Include the full signing secret in the output. Off by default: tool output is logged and ends up in model context."),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id }) => {
+    async ({ agent_id, reveal_secret }) => {
       try {
         const result = agent_id
           ? await api.getAgentWebhook(agent_id)
@@ -1482,7 +1527,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
               : "No webhook configured."
           );
         }
-        return ok(JSON.stringify(result, null, 2));
+        const shown = reveal_secret ? result : { ...result, secret: maskSecret(result.secret) };
+        return ok(JSON.stringify(shown, null, 2));
       } catch (e) {
         return err(e);
       }
@@ -1494,7 +1540,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "Set a webhook URL to receive inbound messages and call events.\n\n" +
       "Pass agent_id to set a webhook for a specific agent (overrides project default). " +
       "Omit agent_id to set the project-level webhook for all agents.\n" +
-      "The webhook secret is returned — use it to verify signatures.",
+      "The signing secret is masked by default. Prefer retrieving it from the dashboard; " +
+      "reveal_secret=true exposes it to model context, transcripts and client logs.",
     {
       url: z
         .string()
@@ -1514,16 +1561,21 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .number()
         .optional()
         .describe("Webhook response timeout in seconds"),
+      reveal_secret: z
+        .boolean()
+        .default(false)
+        .describe("Print the full signing secret. Off by default: tool output is logged and ends up in model context."),
     },
     { idempotentHint: true },
-    async ({ url, agent_id, context_limit, timeout }) => {
+    async ({ url, agent_id, context_limit, timeout, reveal_secret }) => {
       try {
         const result = agent_id
           ? await api.setAgentWebhook(agent_id, url, context_limit, timeout)
           : await api.setWebhook(url, context_limit, timeout);
         const scope = agent_id ? `Agent ${agent_id}` : "Project";
+        const secret = reveal_secret ? result.secret : maskSecret(result.secret);
         return ok(
-          `${scope} webhook set!\n  URL: ${result.url}\n  Secret: ${result.secret}\n  Status: ${result.status}`
+          `${scope} webhook set!\n  URL: ${result.url}\n  Secret: ${secret}\n  Status: ${result.status}`
         );
       } catch (e) {
         return err(e);
