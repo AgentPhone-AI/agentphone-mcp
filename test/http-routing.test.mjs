@@ -37,7 +37,7 @@ async function waitUntilReady(url, child) {
   throw new Error(`HTTP server did not become ready: ${lastError ?? "timeout"}`);
 }
 
-async function startHttpServer(t, environment = {}) {
+async function startHttpServer(t, environment = {}, args = []) {
   const port = await reservePort();
   const origin = `http://localhost:${port}`;
   const env = {
@@ -53,7 +53,7 @@ async function startHttpServer(t, environment = {}) {
   delete env.MCP_OAUTH_CLIENT_SECRET;
   Object.assign(env, environment);
 
-  const child = spawn(process.execPath, ["dist/index.js"], {
+  const child = spawn(process.execPath, ["dist/index.js", ...args], {
     cwd: process.cwd(),
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -173,4 +173,34 @@ test("HTTP mode preserves an explicit development environment", async (t) => {
   } catch (error) {
     throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
   }
+});
+
+
+test("--port selects the HTTP listen port instead of PORT", async (t) => {
+  const cliPort = await reservePort();
+  const { child, logs } = await startHttpServer(t, {}, ["--http", "--port", String(cliPort)]);
+  await waitUntilReady(`http://localhost:${cliPort}/.well-known/mcp/server-card.json`, child);
+  assert.match(logs(), new RegExp(`listening on port ${cliPort}\\b`));
+});
+
+
+for (const value of ["", "abc", "0", "65536", "3.5", "3000oops"]) {
+  test(`--port rejects invalid value ${JSON.stringify(value)}`, async () => {
+    const child = spawn(process.execPath, ["dist/index.js", "--http", "--port", value], {
+      cwd: process.cwd(),
+      env: { ...process.env, MCP_USE_ANONYMIZED_TELEMETRY: "false" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const [code] = await once(child, "close");
+    assert.equal(code, 1);
+    assert.match(stderr, /Invalid port/);
+  });
+}
+
+test("--port=PORT also selects the HTTP listen port", async (t) => {
+  const cliPort = await reservePort();
+  const { child } = await startHttpServer(t, {}, ["--http", `--port=${cliPort}`]);
+  await waitUntilReady(`http://localhost:${cliPort}/.well-known/mcp/server-card.json`, child);
 });
