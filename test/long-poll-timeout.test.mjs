@@ -57,3 +57,20 @@ test("make_conversation_call abort timer follows max_wait_seconds", async () => 
   );
   assert.ok(delay > 20_000 && delay < 120_000, `abort timer ${delay}ms should track the 20s wait`);
 });
+
+test("get_call wait without an explicit timeout uses the server maximum", async () => {
+  const delay = await abortDelayFor((api) => api.getCall("call_1", { wait: true }));
+  assert.ok(delay > 300_000, `abort timer ${delay}ms must exceed the 300s default wait`);
+});
+
+test("get_call wait with timeout 0 (not sent to the server) uses the server maximum", async () => {
+  const delay = await abortDelayFor((api) => api.getCall("call_1", { wait: true, timeout: 0 }));
+  assert.ok(delay > 300_000, `abort timer ${delay}ms must exceed the 300s default wait`);
+});
+
+test("make_conversation_call wait without maxWaitSeconds uses the server maximum", async () => {
+  const delay = await abortDelayFor((api) =>
+    api.makeConversationCall("agent_1", "+14155550123", "Prompt", undefined, true),
+  );
+  assert.ok(delay > 600_000, `abort timer ${delay}ms must exceed the 600s default wait`);
+});
