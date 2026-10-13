@@ -146,7 +146,7 @@ server stores no credentials.
 | Tool | Description |
 |------|-------------|
 | `send_message` | Send SMS or iMessage. Supports media, threaded replies (`reply_to_message_id`), iMessage send effects (`send_style`), and group chats |
-| `get_messages` | Get messages for a specific number |
+| `get_messages` | Get messages for a specific number; paginate with `before`/`after` ISO timestamps |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
 | `update_conversation` | Set metadata on a conversation |
@@ -171,7 +171,7 @@ server stores no credentials.
 
 | Tool | Description |
 |------|-------------|
-| `list_agents` | List all agents with their numbers and voice config |
+| `list_agents` | List agents with their numbers and voice config; paginate with `offset` |
 | `create_agent` | Create an agent with voice, system prompt, call transfer, voicemail, and voice tuning (speed, interruption sensitivity, backchannel, language, and more) |
 | `update_agent` | Update an agent's configuration |
 | `delete_agent` | Delete an agent (numbers are kept but unassigned) |
