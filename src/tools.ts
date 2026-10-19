@@ -458,7 +458,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "get_messages",
     "Get SMS messages for a specific phone number, identified by its number ID. " +
-      "Returns individual messages rather than grouped conversation threads.",
+      "Returns individual messages rather than grouped conversation threads. " +
+      "Use before/after ISO timestamps to page through message history; results are newest first.",
     {
       number_id: z.string().describe("The ID of the phone number"),
       limit: z
@@ -467,20 +468,35 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .max(200)
         .default(50)
         .describe("Max messages to return"),
+      before: z
+        .string()
+        .datetime({ offset: true })
+        .optional()
+        .describe("Return messages before this ISO timestamp (use the oldest receivedAt to fetch older messages)"),
+      after: z
+        .string()
+        .datetime({ offset: true })
+        .optional()
+        .describe("Return messages after this ISO timestamp"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ number_id, limit }) => {
+    async ({ number_id, limit, before, after }) => {
       try {
-        const result = await api.getMessages(number_id, limit);
+        const result = await api.getMessages(number_id, limit, before, after);
         if (result.data.length === 0) {
-          return ok("No messages found for this number.");
+          return ok(before || after
+            ? "No messages found for this number in the requested time range."
+            : "No messages found for this number.");
         }
 
         const formatted = result.data
           .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
           .join("\n");
 
-        return ok(`${result.data.length} message(s):\n\n${formatted}`);
+        const nextPage = result.hasMore
+          ? `\n\nMore messages available. Use the same number_id${after ? " and after filter" : ""}, with before="${result.data[result.data.length - 1].receivedAt}" to fetch older messages.`
+          : "";
+        return ok(`${result.data.length} message(s):\n\n${formatted}${nextPage}`);
       } catch (e) {
         return err(e);
       }
@@ -785,7 +801,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "list_agents",
     "List all agents with their phone numbers and voice configuration. " +
-      "An agent is required before you can make calls — it owns phone numbers and handles voice/SMS.",
+      "An agent is required before you can make calls — it owns phone numbers and handles voice/SMS. " +
+      "Use offset to fetch later pages.",
     {
       limit: z
         .number()
@@ -793,11 +810,17 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .max(100)
         .default(20)
         .describe("Max results to return"),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe("Number of results to skip (for pagination)"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ limit, offset }) => {
       try {
-        const result = await api.listAgents(limit);
+        const result = await api.listAgents(limit, offset);
         return ok(JSON.stringify(result, null, 2));
       } catch (e) {
         return err(e);

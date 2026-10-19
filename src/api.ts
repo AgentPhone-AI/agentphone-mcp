@@ -103,7 +103,10 @@ export class AgentPhoneAPI {
 
   // --- SMS / Messages ---
 
-  async getMessages(numberId: string, limit = 50) {
+  async getMessages(numberId: string, limit = 50, before?: string, after?: string) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (before !== undefined) query.set("before", before);
+    if (after !== undefined) query.set("after", after);
     return this.request<{
       data: Array<{
         id: string;
@@ -113,7 +116,7 @@ export class AgentPhoneAPI {
         receivedAt: string;
       }>;
       hasMore: boolean;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}`);
+    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?${query}`);
   }
 
   async sendMessage(params: {
