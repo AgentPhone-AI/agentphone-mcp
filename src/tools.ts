@@ -980,7 +980,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .min(10000)
         .max(3600000)
         .optional()
-        .describe("Hang up after this many ms of caller silence. Default 600000 (10 min)."),
+        .describe("How long the agent waits through continuous caller silence before ending the call. Omit to use the server default (about 10 minutes)."),
       language: z
         .string()
         .optional()
@@ -1101,7 +1101,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .min(10000)
         .max(3600000)
         .optional()
-        .describe("Hang up after this many ms of caller silence. Default 600000 (10 min)."),
+        .describe("How long the agent waits through continuous caller silence before ending the call. Omit to use the server default (about 10 minutes)."),
       language: z
         .string()
         .optional()
@@ -1166,7 +1166,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "get_agent",
-    "Get details for a specific agent including its phone numbers, voice configuration, and instructions.",
+    "Get one agent's full configuration. Returns its voice settings, system prompt, model tier, " +
+      "transfer and voicemail setup, and the phone numbers attached to it.",
     {
       agent_id: z.string().describe("The ID of the agent to fetch, from list_agents."),
     },
@@ -1418,7 +1419,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "- create: requires phone_number and name\n" +
       "- update: requires contact_id; only the fields you pass are changed\n" +
       "- delete: requires contact_id (permanent)\n\n" +
-      "contact_id refers to a saved contact.",
+      "contact_id refers to a saved contact. Create and update return the saved contact (id, name, " +
+      "phone number, email, notes); delete returns a success flag.",
     {
       action: z
         .enum(["create", "update", "delete"])
