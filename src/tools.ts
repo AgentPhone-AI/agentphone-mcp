@@ -374,7 +374,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "send_message",
     "Send an SMS or iMessage from one of your agent's phone numbers, or react to an existing " +
       "message. The tool has two modes, so which inputs are required depends on the mode:\n" +
-      "- Send: give a recipient (to_number) and a sender (agent_id, from_number, or number_id), " +
+      "- Send: give a recipient (to_number) or recipients (to start a new iMessage group chat with 2 to 32 members), and a sender (agent_id, from_number, or number_id), " +
       "plus body and/or media. The agent must have a phone number attached; number_id or " +
       "from_number picks which one when it has several.\n" +
       "- React: set reaction and react_to_message_id (iMessage only) to tapback or emoji-react to " +
@@ -390,7 +390,15 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       to_number: z
         .string()
         .optional()
-        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Required when sending a message (not needed for a reaction)."),
+        .describe("Recipient phone number or group ID. Mutually exclusive with recipients."),
+      recipients: z
+        .array(z.string())
+        .optional()
+        .describe("Start a NEW iMessage group chat with 2 to 32 members (e.g. ['+14155550101', '+14155550102']). Mutually exclusive with to_number."),
+      channel: z
+        .string()
+        .optional()
+        .describe("Currently supports 'whatsapp' to force delivery via the account's WhatsApp binding rather than dynamic iMessage routing."),
       body: z
         .string()
         .optional()
@@ -433,7 +441,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("iMessage only. Tapback or single emoji applied to react_to_message_id: one of love, like, dislike, laugh, emphasize, question, or a single emoji (e.g. '🔥'). When set, this reacts instead of sending a message."),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, react_to_message_id, reaction }) => {
+    async ({ agent_id, to_number, recipients, channel, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, react_to_message_id, reaction }) => {
       // Reaction mode: react to an existing message instead of sending one.
       // A reaction and a message in the same call used to run the reaction and
       // drop the message without a word. Refuse the combination instead.
@@ -454,6 +462,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           agent_id ? "agent_id" : null,
           number_id ? "number_id" : null,
           from_number ? "from_number" : null,
+          recipients?.length ? "recipients" : null,
+          channel ? "channel" : null,
         ].filter((f): f is string => f !== null);
         if (conflicting.length) {
           return err(
@@ -472,18 +482,36 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
       }
 
+      if (recipients?.length && channel) {
+        return err(new Error("channel cannot be used with recipients to start a new iMessage group chat."));
+      }
       if (!agent_id && !from_number && !number_id) {
         return err(new Error("Provide agent_id, from_number, or number_id to identify the sender."));
       }
-      if (!to_number) {
-        return err(new Error("to_number is required when sending a message."));
+      if (recipients?.length && (recipients.length < 2 || recipients.length > 32)) {
+        return err(new Error("recipients must have 2 to 32 members to start a group chat."));
+      }
+      if (!to_number && (!recipients || recipients.length === 0)) {
+        return err(new Error("Either to_number or recipients must be provided when sending a message."));
+      }
+      if (to_number && recipients && recipients.length > 0) {
+        return err(new Error("to_number and recipients are mutually exclusive. Use to_number for existing chats and recipients to start a new group."));
       }
       // Only enforce E.164 when the recipient is clearly a phone number (leading +).
       // Short codes, group IDs (grp_...), emails, and other destination identifiers
       // are passed through for the server to normalize and route.
-      if (to_number.startsWith("+")) {
+      if (to_number && to_number.startsWith("+")) {
         const phoneErr = validateE164(to_number);
         if (phoneErr) return err(new Error(phoneErr));
+      }
+      for (const r of recipients ?? []) {
+        if (!r.trim()) {
+          return err(new Error("recipients must not contain empty values."));
+        }
+        if (r.startsWith("+") || /^\d[\d\s().-]*$/.test(r)) {
+          const rErr = validateE164(r);
+          if (rErr) return err(new Error(`recipients: ${rErr}`));
+        }
       }
       if (from_number) {
         const fromErr = validateE164(from_number);
@@ -491,9 +519,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
 
       try {
-        const result = await api.sendMessage({
+        const params = {
           agentId: agent_id,
-          toNumber: to_number,
+          channel,
           body,
           mediaUrl: media_url,
           mediaUrls: media_urls,
@@ -501,7 +529,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           fromNumber: from_number,
           replyToMessageId: reply_to_message_id,
           sendStyle: send_style,
-        });
+        };
+        const destination = recipients?.length
+          ? { recipients }
+          : to_number
+            ? { toNumber: to_number }
+            : null;
+        if (!destination) {
+          return err(new Error("Either to_number or recipients must be provided when sending a message."));
+        }
+        const result = await api.sendMessage({ ...params, ...destination });
         const lines = [
           `Message sent!`,
           `  From: ${result.from_number}`,

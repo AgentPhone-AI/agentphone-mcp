@@ -126,7 +126,7 @@ export class AgentPhoneAPI {
 
   async sendMessage(params: {
     agentId?: string;
-    toNumber: string;
+    channel?: string;
     body: string;
     mediaUrl?: string;
     mediaUrls?: string[];
@@ -134,7 +134,10 @@ export class AgentPhoneAPI {
     fromNumber?: string;
     replyToMessageId?: string;
     sendStyle?: string;
-  }) {
+  } & (
+    | { toNumber: string; recipients?: never }
+    | { toNumber?: never; recipients: string[] }
+  )) {
     return this.request<{
       id: string;
       status: string;
@@ -147,6 +150,8 @@ export class AgentPhoneAPI {
     }>("POST", "/v1/messages", {
       agent_id: params.agentId,
       to_number: params.toNumber,
+      recipients: params.recipients?.length ? params.recipients : undefined,
+      channel: params.channel,
       body: params.body,
       media_url: params.mediaUrl,
       media_urls: params.mediaUrls,

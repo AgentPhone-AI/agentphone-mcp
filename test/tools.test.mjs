@@ -158,6 +158,100 @@ test("send_message still sends a plain message", async () => {
   assert.deepEqual(h.calls.map((c) => c.name), ["sendMessage"]);
 });
 
+test("send_message rejects WhatsApp routing for new iMessage groups", async () => {
+  const h = harness();
+  const result = await h.call("send_message", {
+    agent_id: "agt_1",
+    recipients: ["+14155550101", "+14155550102"],
+    channel: "whatsapp",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /channel cannot be used with recipients/);
+  assert.deepEqual(h.calls, []);
+});
+
+test("send_message enforces the 2 to 32 member group limit", async (t) => {
+  for (const recipients of [
+    ["+14155550101"],
+    Array.from({ length: 33 }, (_, i) => `+1415${String(i).padStart(7, "0")}`),
+  ]) {
+    await t.test(`${recipients.length} recipients`, async () => {
+      const h = harness();
+      const result = await h.call("send_message", {
+        agent_id: "agt_1",
+        recipients,
+      });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /recipients must have 2 to 32 members/);
+      assert.deepEqual(h.calls, []);
+    });
+  }
+});
+
+test("send_message validates phone recipients and rejects empty group entries", async (t) => {
+  for (const invalidRecipient of ["4155550101", ""]) {
+    await t.test(JSON.stringify(invalidRecipient), async () => {
+      const h = harness();
+      const result = await h.call("send_message", {
+        agent_id: "agt_1",
+        recipients: ["+14155550101", invalidRecipient],
+      });
+      assert.equal(result.isError, true);
+      assert.match(
+        result.content[0].text,
+        invalidRecipient
+          ? /recipients: Phone number must be in E\.164 format/
+          : /recipients must not contain empty values/,
+      );
+      assert.deepEqual(h.calls, []);
+    });
+  }
+});
+
+test("send_message accepts iMessage email and group identifiers as recipients", async () => {
+  const h = harness({
+    sendMessage: async () => ({
+      id: "m_1",
+      status: "queued",
+      channel: "imessage",
+      from_number: "+14155550000",
+      to_number: "group",
+      media_urls: [],
+      reply_to_message_id: null,
+      reply_parent_unresolved: null,
+    }),
+  });
+  const recipients = ["sam@example.com", "grp_123"];
+  const result = await h.call("send_message", {
+    agent_id: "agt_1",
+    recipients,
+  });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(h.calls[0].args[0].recipients, recipients);
+});
+
+test("send_message accepts non-whatsapp channel strings for API validation", async () => {
+  const h = harness({
+    sendMessage: async () => ({
+      id: "m_1",
+      status: "queued",
+      channel: "sms",
+      from_number: "+14155550000",
+      to_number: "+14155551234",
+      media_urls: [],
+      reply_to_message_id: null,
+      reply_parent_unresolved: null,
+    }),
+  });
+  const result = await h.call("send_message", {
+    agent_id: "agt_1",
+    to_number: "+14155551234",
+    channel: "unsupported",
+  });
+  assert.equal(result.isError, undefined);
+  assert.equal(h.calls[0].args[0].channel, "unsupported");
+});
+
 // ---------------------------------------------------------------------------
 // #71 — the description says where the disclosure is enforced
 // ---------------------------------------------------------------------------
