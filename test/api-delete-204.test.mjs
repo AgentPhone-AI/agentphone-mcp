@@ -24,6 +24,20 @@ test("DELETE methods return {success:true} on a 204 no-content response", async 
   }
 });
 
+// Some endpoints answer 200 with an empty body; res.json() would throw there,
+// so request() must treat an empty body as {} regardless of status.
+test("DELETE methods return {success:true} on a 200 with an empty body", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response("", { status: 200 });
+  try {
+    const api = new AgentPhoneAPI("https://example.test", "key");
+    assert.deepEqual(await api.detachNumber("agt_1", "num_1"), { success: true });
+    assert.deepEqual(await api.deleteContact("ct_1"), { success: true });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 // And a non-empty body still passes through untouched (e.g. deleteAgent).
 test("a DELETE that returns a JSON body is passed through", async () => {
   const original = globalThis.fetch;

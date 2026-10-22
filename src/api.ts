@@ -61,8 +61,11 @@ export class AgentPhoneAPI {
         throw new ApiError(res.status, method, path, detail);
       }
 
-      if (res.status === 204) return {} as T;
-      return res.json() as Promise<T>;
+      // Treat any empty body as {} — not just 204. A 200 with no content (which
+      // some DELETE endpoints return) would otherwise throw from res.json().
+      const text = await res.text();
+      if (!text) return {} as T;
+      return JSON.parse(text) as T;
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") {
         throw new ApiError(0, method, path, `Request timed out after ${timeout}ms`);
