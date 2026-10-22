@@ -73,6 +73,16 @@ export class AgentPhoneAPI {
     }
   }
 
+  // DELETE endpoints may answer 204 with no body, for which request() returns
+  // {}. request() rejects on any non-2xx, so a value here means the delete
+  // succeeded — normalize to an explicit { success: true } that callers and the
+  // tools' output schemas rely on (otherwise a 204 yields {} and fails
+  // structuredContent validation).
+  private async deleteExpectingSuccess(path: string): Promise<{ success: boolean }> {
+    await this.request("DELETE", path);
+    return { success: true };
+  }
+
   // --- Numbers ---
 
   async listNumbers(limit = 20, offset = 0) {
@@ -355,8 +365,7 @@ export class AgentPhoneAPI {
   }
 
   async detachNumber(agentId: string, numberId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
+    return this.deleteExpectingSuccess(
       `/v1/agents/${encodeURIComponent(agentId)}/numbers/${encodeURIComponent(numberId)}`
     );
   }
@@ -439,10 +448,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteAgentWebhook(agentId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
-      `/v1/agents/${encodeURIComponent(agentId)}/webhook`
-    );
+    return this.deleteExpectingSuccess(`/v1/agents/${encodeURIComponent(agentId)}/webhook`);
   }
 
   async testAgentWebhook(agentId: string) {
@@ -736,10 +742,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteContact(contactId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
-      `/v1/contacts/${encodeURIComponent(contactId)}`
-    );
+    return this.deleteExpectingSuccess(`/v1/contacts/${encodeURIComponent(contactId)}`);
   }
 
   // --- Webhooks ---
@@ -771,7 +774,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteWebhook() {
-    return this.request<{ success: boolean }>("DELETE", "/v1/webhooks");
+    return this.deleteExpectingSuccess("/v1/webhooks");
   }
 
   async testWebhook() {

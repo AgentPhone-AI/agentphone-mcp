@@ -227,6 +227,20 @@ test("manage_contact update and delete validate (delete passes the real success 
   assert.equal(del.structuredContent.success, true);
 });
 
+// Regression for #93 at the handler layer: a DELETE that comes back as {} (a
+// 204) must still yield a schema-valid result, not a validation error.
+test("delete-style tools tolerate an empty ({}) API result (#93)", async () => {
+  const h = harness(makeStub({ detachNumber: async () => ({}), deleteContact: async () => ({}) }));
+  const d = await h.call("detach_number", { agent_id: "a", number_id: "n" });
+  assert.equal(d.isError, undefined, "detach_number should not error on {}");
+  assert.ok(OUTPUT_SCHEMAS.detach_number.safeParse(d.structuredContent).success, "detach_number tolerates {}");
+  assert.equal(d.structuredContent.success, true);
+
+  const c = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
+  assert.equal(c.isError, undefined, "manage_contact delete should not error on {}");
+  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(c.structuredContent).success, "manage_contact delete tolerates {}");
+});
+
 // There is no structured-content fallback: every success path must return its
 // own structuredContent, and it must satisfy the (now stricter) output schema.
 // Cover the branches the main pass doesn't, so a missing field can't slip
