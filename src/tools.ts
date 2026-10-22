@@ -1188,8 +1188,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     { idempotentHint: true },
     async ({ agent_id, number_id }) => {
       try {
-        const detached = await api.detachNumber(agent_id, number_id);
-        return ok(`Detached number ${number_id} from agent ${agent_id}`, detached);
+        await api.detachNumber(agent_id, number_id);
+        // Explicitly return { success: true } so structuredContent satisfies the output schema
+        return ok(`Detached number ${number_id} from agent ${agent_id}`, { success: true });
       } catch (e) {
         return err(e);
       }
