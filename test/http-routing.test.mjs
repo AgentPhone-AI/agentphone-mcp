@@ -59,6 +59,7 @@ async function startHttpServer(t, environment = {}, args = []) {
   delete env.MCP_ENABLE_INSPECTOR;
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
+  delete env.AGENTPHONE_MCP_PUBLIC_URL;
   Object.assign(env, environment);
 
   const child = spawn(process.execPath, ["dist/index.js", ...args], {
@@ -113,7 +114,9 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     assert.match(authorizationServer.headers.get("content-type") ?? "", /^application\/json\b/);
     assert.equal((await authorizationServer.json()).issuer, origin);
 
-    const challenge = await fetch(`${origin}/mcp`);
+    // Protocol requests (JSON/SSE Accept) still get the OAuth challenge, so
+    // clients can discover the auth flow via RFC 9728.
+    const challenge = await fetch(`${origin}/mcp`, { headers: { Accept: "application/json" } });
     assert.equal(challenge.status, 401);
     assert.match(challenge.headers.get("content-type") ?? "", /^application\/json\b/);
     const authenticate = challenge.headers.get("www-authenticate") ?? "";
@@ -124,9 +127,53 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     assert.match(advertisedMetadata.headers.get("content-type") ?? "", /^application\/json\b/);
     assert.match((await advertisedMetadata.json()).resource, new RegExp(`^${origin}/?(?:mcp)?$`));
 
+    // A browser GET to /mcp serves the public landing page (setup instructions)
+    // without auth, so the endpoint is discoverable instead of a bare 401.
+    const landing = await fetch(`${origin}/mcp`, { headers: { Accept: "text/html" } });
+    assert.equal(landing.status, 200);
+    assert.match(landing.headers.get("content-type") ?? "", /^text\/html\b/);
+
+    // A bare GET (default Accept: */*) is treated as a browser visit too, so it
+    // serves the landing page rather than a 401. OAuth discovery remains available
+    // via the JSON-Accept challenge above and the .well-known endpoints.
+    const bare = await fetch(`${origin}/mcp`, { headers: { Accept: "*/*" } });
+    assert.equal(bare.status, 200);
+    assert.match(bare.headers.get("content-type") ?? "", /^text\/html\b/);
+
+    // The public install manifest is served (unauthenticated) at both paths,
+    // with a remote URL derived from the request origin and auth metadata.
+    for (const path of ["/.well-known/mcp.json", "/mcp.json"]) {
+      const manifest = await fetch(`${origin}${path}`);
+      assert.equal(manifest.status, 200, `${path} should be public`);
+      assert.match(manifest.headers.get("content-type") ?? "", /^application\/json\b/);
+      const body = await manifest.json();
+      assert.equal(body.version, packageVersion);
+      // No trusted X-Forwarded-Proto here, so the remote defaults to https on
+      // the request host (never an unencrypted URL for the key-bearing remote).
+      assert.equal(body.remotes[0].url, `https://${new URL(origin).host}/mcp`);
+      assert.equal(body.remotes[0].headers[0].name, "Authorization");
+    }
+
     const missing = await fetch(`${origin}/this-route-does-not-exist`);
     assert.equal(missing.status, 404);
     assert.doesNotMatch(missing.headers.get("content-type") ?? "", /^text\/html\b/);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("install manifest prefers AGENTPHONE_MCP_PUBLIC_URL over request headers", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t, {
+    AGENTPHONE_API_KEY: "test-api-key",
+    AGENTPHONE_MCP_PUBLIC_URL: "https://mcp.example.test/",
+  });
+  try {
+    await waitUntilReady(`${origin}/.well-known/mcp.json`, child);
+    // Even with a forged Host header, the configured public URL is advertised.
+    const manifest = await fetch(`${origin}/.well-known/mcp.json`, { headers: { Host: "evil.example" } });
+    assert.equal(manifest.status, 200);
+    const body = await manifest.json();
+    assert.equal(body.remotes[0].url, "https://mcp.example.test/mcp");
   } catch (error) {
     throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
   }

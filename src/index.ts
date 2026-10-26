@@ -435,6 +435,10 @@ async function startHttp(): Promise<void> {
     instructions: INSTRUCTIONS,
     websiteUrl: WEBSITE_URL,
     icons: ICONS,
+    // Serve the HTML landing page (connection/setup instructions + tool list)
+    // on a browser GET to /mcp without a bearer token, while MCP protocol
+    // traffic (POST) stays authenticated. Makes setup publicly discoverable.
+    publicLandingPage: true,
     ...(oauthEnabled
       ? {
           oauth: oauthProxy({
@@ -493,6 +497,83 @@ async function startHttp(): Promise<void> {
       tools: ["dynamic"],
     });
   });
+
+  // Public, unauthenticated install manifest (the MCP registry `server.json`
+  // shape) so clients and catalogs can discover how to connect. Served at both
+  // the well-known path and /mcp.json. The remote URL is derived from the
+  // incoming request so a self-hosted instance advertises its own endpoint
+  // rather than the hosted one.
+  const buildManifest = (origin: string) => ({
+    $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    name: "io.github.AgentPhone-AI/agentphone",
+    title: TITLE,
+    // The registry server.json schema caps description at 100 chars, so use a
+    // short one here rather than the longer handshake DESCRIPTION.
+    description: "Give AI agents real phone numbers, messages, and voice calls via MCP.",
+    version: VERSION,
+    websiteUrl: WEBSITE_URL,
+    repository: { url: "https://github.com/AgentPhone-AI/agentphone-mcp", source: "github" },
+    remotes: [
+      {
+        type: "streamable-http",
+        url: `${origin}/mcp`,
+        headers: [
+          {
+            name: "Authorization",
+            description:
+              "Bearer token for AgentPhone API authentication (format: Bearer YOUR_API_KEY). " +
+              "Get your key at https://agentphone.ai",
+            isRequired: true,
+            isSecret: true,
+          },
+        ],
+      },
+    ],
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "agentphone-mcp",
+        version: VERSION,
+        transport: { type: "stdio" },
+        environmentVariables: [
+          {
+            name: "AGENTPHONE_API_KEY",
+            description: "Your AgentPhone API key. Get one at https://agentphone.ai",
+            isRequired: true,
+            isSecret: true,
+          },
+        ],
+      },
+    ],
+  });
+  // Prefer an explicitly configured public URL so the advertised, secret-bearing
+  // remote never depends on client-controlled headers. The hosted deployment
+  // should set AGENTPHONE_MCP_PUBLIC_URL (e.g. https://mcp.agentphone.ai).
+  const configuredPublicUrl = process.env.AGENTPHONE_MCP_PUBLIC_URL?.replace(/\/+$/, "");
+  const serveManifest = (c: any) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    c.header("Access-Control-Allow-Methods", "GET");
+    c.header("Access-Control-Allow-Headers", "Content-Type");
+    let origin = configuredPublicUrl;
+    if (!origin) {
+      // Self-hosted fallback: derive from the request, but only trust the first
+      // forwarded hop, allowlist the scheme to http/https (defaulting to https
+      // for a secret-bearing URL), and Vary so a forged Host can't poison a
+      // shared cache into advertising an attacker's endpoint.
+      c.header("Vary", "Host, X-Forwarded-Proto");
+      const reqUrl = new URL(c.req.url);
+      const firstHop = (c.req.header("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
+      // Default to https when no trusted forwarded scheme is present: the remote
+      // carries the API key, so never advertise an unencrypted endpoint from the
+      // bare Node request URL (which reports http behind a TLS-terminating proxy).
+      const proto = firstHop === "http" ? "http" : "https";
+      const host = c.req.header("host") || reqUrl.host;
+      origin = `${proto}://${host}`;
+    }
+    return c.json(buildManifest(origin));
+  };
+  server.app.get("/.well-known/mcp.json", serveManifest);
+  server.app.get("/mcp.json", serveManifest);
 
   // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
   // and bind the per-request token.
