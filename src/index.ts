@@ -550,6 +550,12 @@ async function startHttp(): Promise<void> {
     c.header("Cache-Control", "public, max-age=3600");
     c.header("Access-Control-Allow-Methods", "GET");
     c.header("Access-Control-Allow-Headers", "Content-Type");
+    // The advertised remote URL is derived from the request's Host/forwarded
+    // proto, and the response is publicly cacheable — so key caches on those
+    // headers. Without Vary, a forged Host could poison a shared cache with a
+    // manifest pointing at an attacker's endpoint, and clients would send their
+    // API key there.
+    c.header("Vary", "Host, X-Forwarded-Proto");
     const reqUrl = new URL(c.req.url);
     const proto = c.req.header("x-forwarded-proto") || reqUrl.protocol.replace(/:$/, "");
     const host = c.req.header("host") || reqUrl.host;
