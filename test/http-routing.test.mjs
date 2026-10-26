@@ -148,7 +148,9 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
       assert.match(manifest.headers.get("content-type") ?? "", /^application\/json\b/);
       const body = await manifest.json();
       assert.equal(body.version, packageVersion);
-      assert.equal(body.remotes[0].url, `${origin}/mcp`);
+      // No trusted X-Forwarded-Proto here, so the remote defaults to https on
+      // the request host (never an unencrypted URL for the key-bearing remote).
+      assert.equal(body.remotes[0].url, `https://${new URL(origin).host}/mcp`);
       assert.equal(body.remotes[0].headers[0].name, "Authorization");
     }
 

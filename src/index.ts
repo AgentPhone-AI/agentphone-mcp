@@ -563,8 +563,10 @@ async function startHttp(): Promise<void> {
       c.header("Vary", "Host, X-Forwarded-Proto");
       const reqUrl = new URL(c.req.url);
       const firstHop = (c.req.header("x-forwarded-proto") || "").split(",")[0].trim().toLowerCase();
-      let proto = firstHop || reqUrl.protocol.replace(/:$/, "");
-      if (proto !== "http" && proto !== "https") proto = "https";
+      // Default to https when no trusted forwarded scheme is present: the remote
+      // carries the API key, so never advertise an unencrypted endpoint from the
+      // bare Node request URL (which reports http behind a TLS-terminating proxy).
+      const proto = firstHop === "http" ? "http" : "https";
       const host = c.req.header("host") || reqUrl.host;
       origin = `${proto}://${host}`;
     }
