@@ -59,6 +59,7 @@ async function startHttpServer(t, environment = {}, args = []) {
   delete env.MCP_ENABLE_INSPECTOR;
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
+  delete env.AGENTPHONE_MCP_PUBLIC_URL;
   Object.assign(env, environment);
 
   const child = spawn(process.execPath, ["dist/index.js", ...args], {
@@ -154,6 +155,23 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     const missing = await fetch(`${origin}/this-route-does-not-exist`);
     assert.equal(missing.status, 404);
     assert.doesNotMatch(missing.headers.get("content-type") ?? "", /^text\/html\b/);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
+
+test("install manifest prefers AGENTPHONE_MCP_PUBLIC_URL over request headers", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t, {
+    AGENTPHONE_API_KEY: "test-api-key",
+    AGENTPHONE_MCP_PUBLIC_URL: "https://mcp.example.test/",
+  });
+  try {
+    await waitUntilReady(`${origin}/.well-known/mcp.json`, child);
+    // Even with a forged Host header, the configured public URL is advertised.
+    const manifest = await fetch(`${origin}/.well-known/mcp.json`, { headers: { Host: "evil.example" } });
+    assert.equal(manifest.status, 200);
+    const body = await manifest.json();
+    assert.equal(body.remotes[0].url, "https://mcp.example.test/mcp");
   } catch (error) {
     throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
   }

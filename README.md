@@ -130,6 +130,7 @@ The optional anonymous mode instead uses the configured server API key.
 | `MCP_OAUTH_CLIENT_SECRET` | Optional. Set = confidential gateway; unset = public client (gateway registered with `token_endpoint_auth_method=none`, advertises `none` downstream) |
 | `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
 | `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
+| `AGENTPHONE_MCP_PUBLIC_URL` | Public base URL this server is reached at, advertised in the `/.well-known/mcp.json` install manifest (e.g. `https://mcp.agentphone.ai`). If unset, it's derived from the request. |
 
 ## Highlights
 
