@@ -500,16 +500,35 @@ async function startHttp(): Promise<void> {
 
   // Public, unauthenticated install manifest (the MCP registry `server.json`
   // shape) so clients and catalogs can discover how to connect. Served at both
-  // the well-known path and /mcp.json.
-  const installManifest = {
+  // the well-known path and /mcp.json. The remote URL is derived from the
+  // incoming request so a self-hosted instance advertises its own endpoint
+  // rather than the hosted one.
+  const buildManifest = (origin: string) => ({
     $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
     name: "io.github.AgentPhone-AI/agentphone",
     title: TITLE,
-    description: DESCRIPTION,
+    // The registry server.json schema caps description at 100 chars, so use a
+    // short one here rather than the longer handshake DESCRIPTION.
+    description: "Give AI agents real phone numbers, messages, and voice calls via MCP.",
     version: VERSION,
     websiteUrl: WEBSITE_URL,
     repository: { url: "https://github.com/AgentPhone-AI/agentphone-mcp", source: "github" },
-    remotes: [{ type: "streamable-http", url: `https://mcp.agentphone.ai/mcp` }],
+    remotes: [
+      {
+        type: "streamable-http",
+        url: `${origin}/mcp`,
+        headers: [
+          {
+            name: "Authorization",
+            description:
+              "Bearer token for AgentPhone API authentication (format: Bearer YOUR_API_KEY). " +
+              "Get your key at https://agentphone.ai",
+            isRequired: true,
+            isSecret: true,
+          },
+        ],
+      },
+    ],
     packages: [
       {
         registryType: "npm",
@@ -526,12 +545,15 @@ async function startHttp(): Promise<void> {
         ],
       },
     ],
-  };
+  });
   const serveManifest = (c: any) => {
     c.header("Cache-Control", "public, max-age=3600");
     c.header("Access-Control-Allow-Methods", "GET");
     c.header("Access-Control-Allow-Headers", "Content-Type");
-    return c.json(installManifest);
+    const reqUrl = new URL(c.req.url);
+    const proto = c.req.header("x-forwarded-proto") || reqUrl.protocol.replace(/:$/, "");
+    const host = c.req.header("host") || reqUrl.host;
+    return c.json(buildManifest(`${proto}://${host}`));
   };
   server.app.get("/.well-known/mcp.json", serveManifest);
   server.app.get("/mcp.json", serveManifest);

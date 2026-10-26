@@ -132,12 +132,23 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     assert.equal(landing.status, 200);
     assert.match(landing.headers.get("content-type") ?? "", /^text\/html\b/);
 
-    // The public install manifest is served (unauthenticated) at both paths.
+    // A bare GET (default Accept: */*) is treated as a browser visit too, so it
+    // serves the landing page rather than a 401. OAuth discovery remains available
+    // via the JSON-Accept challenge above and the .well-known endpoints.
+    const bare = await fetch(`${origin}/mcp`, { headers: { Accept: "*/*" } });
+    assert.equal(bare.status, 200);
+    assert.match(bare.headers.get("content-type") ?? "", /^text\/html\b/);
+
+    // The public install manifest is served (unauthenticated) at both paths,
+    // with a remote URL derived from the request origin and auth metadata.
     for (const path of ["/.well-known/mcp.json", "/mcp.json"]) {
       const manifest = await fetch(`${origin}${path}`);
       assert.equal(manifest.status, 200, `${path} should be public`);
       assert.match(manifest.headers.get("content-type") ?? "", /^application\/json\b/);
-      assert.equal((await manifest.json()).version, packageVersion);
+      const body = await manifest.json();
+      assert.equal(body.version, packageVersion);
+      assert.equal(body.remotes[0].url, `${origin}/mcp`);
+      assert.equal(body.remotes[0].headers[0].name, "Authorization");
     }
 
     const missing = await fetch(`${origin}/this-route-does-not-exist`);
