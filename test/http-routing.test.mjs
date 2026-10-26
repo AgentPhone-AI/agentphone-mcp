@@ -113,7 +113,9 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     assert.match(authorizationServer.headers.get("content-type") ?? "", /^application\/json\b/);
     assert.equal((await authorizationServer.json()).issuer, origin);
 
-    const challenge = await fetch(`${origin}/mcp`);
+    // Protocol requests (JSON/SSE Accept) still get the OAuth challenge, so
+    // clients can discover the auth flow via RFC 9728.
+    const challenge = await fetch(`${origin}/mcp`, { headers: { Accept: "application/json" } });
     assert.equal(challenge.status, 401);
     assert.match(challenge.headers.get("content-type") ?? "", /^application\/json\b/);
     const authenticate = challenge.headers.get("www-authenticate") ?? "";
@@ -123,6 +125,20 @@ test("production HTTP routing serves discovery JSON and returns real 404s", asyn
     assert.equal(advertisedMetadata.status, 200);
     assert.match(advertisedMetadata.headers.get("content-type") ?? "", /^application\/json\b/);
     assert.match((await advertisedMetadata.json()).resource, new RegExp(`^${origin}/?(?:mcp)?$`));
+
+    // A browser GET to /mcp serves the public landing page (setup instructions)
+    // without auth, so the endpoint is discoverable instead of a bare 401.
+    const landing = await fetch(`${origin}/mcp`, { headers: { Accept: "text/html" } });
+    assert.equal(landing.status, 200);
+    assert.match(landing.headers.get("content-type") ?? "", /^text\/html\b/);
+
+    // The public install manifest is served (unauthenticated) at both paths.
+    for (const path of ["/.well-known/mcp.json", "/mcp.json"]) {
+      const manifest = await fetch(`${origin}${path}`);
+      assert.equal(manifest.status, 200, `${path} should be public`);
+      assert.match(manifest.headers.get("content-type") ?? "", /^application\/json\b/);
+      assert.equal((await manifest.json()).version, packageVersion);
+    }
 
     const missing = await fetch(`${origin}/this-route-does-not-exist`);
     assert.equal(missing.status, 404);

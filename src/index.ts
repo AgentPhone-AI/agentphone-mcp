@@ -435,6 +435,10 @@ async function startHttp(): Promise<void> {
     instructions: INSTRUCTIONS,
     websiteUrl: WEBSITE_URL,
     icons: ICONS,
+    // Serve the HTML landing page (connection/setup instructions + tool list)
+    // on a browser GET to /mcp without a bearer token, while MCP protocol
+    // traffic (POST) stays authenticated. Makes setup publicly discoverable.
+    publicLandingPage: true,
     ...(oauthEnabled
       ? {
           oauth: oauthProxy({
@@ -493,6 +497,44 @@ async function startHttp(): Promise<void> {
       tools: ["dynamic"],
     });
   });
+
+  // Public, unauthenticated install manifest (the MCP registry `server.json`
+  // shape) so clients and catalogs can discover how to connect. Served at both
+  // the well-known path and /mcp.json.
+  const installManifest = {
+    $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+    name: "io.github.AgentPhone-AI/agentphone",
+    title: TITLE,
+    description: DESCRIPTION,
+    version: VERSION,
+    websiteUrl: WEBSITE_URL,
+    repository: { url: "https://github.com/AgentPhone-AI/agentphone-mcp", source: "github" },
+    remotes: [{ type: "streamable-http", url: `https://mcp.agentphone.ai/mcp` }],
+    packages: [
+      {
+        registryType: "npm",
+        identifier: "agentphone-mcp",
+        version: VERSION,
+        transport: { type: "stdio" },
+        environmentVariables: [
+          {
+            name: "AGENTPHONE_API_KEY",
+            description: "Your AgentPhone API key. Get one at https://agentphone.ai",
+            isRequired: true,
+            isSecret: true,
+          },
+        ],
+      },
+    ],
+  };
+  const serveManifest = (c: any) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    c.header("Access-Control-Allow-Methods", "GET");
+    c.header("Access-Control-Allow-Headers", "Content-Type");
+    return c.json(installManifest);
+  };
+  server.app.get("/.well-known/mcp.json", serveManifest);
+  server.app.get("/mcp.json", serveManifest);
 
   // Adapter: keep tools.ts's SDK-style registration (4- and 5-arg overloads)
   // and bind the per-request token.
