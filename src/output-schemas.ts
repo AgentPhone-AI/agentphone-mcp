@@ -130,11 +130,17 @@ const webhookFields = {
 const deliveryEntry = z
   .object({
     id: z.string().optional().describe("Delivery attempt ID."),
-    event: z.string().optional().describe("Event type that was delivered."),
-    statusCode: z.number().nullable().optional().describe("HTTP status your endpoint returned, or null."),
-    success: z.boolean().optional().describe("Whether the delivery succeeded."),
-    deliveredAt: z.string().optional().describe("When the delivery was attempted (ISO 8601)."),
-    responseMs: z.number().nullable().optional().describe("Your endpoint's response time in ms, or null."),
+    messageId: z.string().nullable().optional().describe("Message this delivery belongs to, or null."),
+    eventType: z.string().nullable().optional().describe("Event type that was delivered, or null."),
+    channel: z.string().nullable().optional().describe("Channel the event came from, or null."),
+    status: z.string().optional().describe("Delivery status."),
+    httpStatus: z.number().nullable().optional().describe("HTTP status your endpoint returned, or null."),
+    errorMessage: z.string().nullable().optional().describe("Delivery error message, or null."),
+    responseBody: z.string().nullable().optional().describe("Body your endpoint returned, or null."),
+    attemptCount: z.number().optional().describe("Number of delivery attempts."),
+    lastAttemptAt: z.string().nullable().optional().describe("Time of the last attempt (ISO 8601), or null."),
+    nextRetryAt: z.string().nullable().optional().describe("Time of the next retry (ISO 8601), or null."),
+    createdAt: z.string().optional().describe("When the delivery record was created (ISO 8601)."),
   })
   .passthrough()
   .describe("One webhook delivery attempt.");

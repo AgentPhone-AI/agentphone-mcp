@@ -356,6 +356,9 @@ test("list_webhook_deliveries reads the documented project response", async () =
   assert.match(result.content[0].text, /\[2026-10-01T12:00:00Z\] sms\.received → delivered \(200\) id=dlv_1/);
   assert.match(result.content[0].text, /\[2026-10-01T12:00:00Z\] call\.ended → failed \(502\) id=dlv_2/);
   assert.match(result.content[0].text, /Total: 2/);
+  assert.equal(result.structuredContent.data[0].messageId, "msg_1");
+  assert.equal(result.structuredContent.data[0].channel, "sms");
+  assert.equal(result.structuredContent.data[0].attemptCount, 1);
 });
 
 test("list_webhook_deliveries reads the documented agent response", async () => {
@@ -365,5 +368,6 @@ test("list_webhook_deliveries reads the documented agent response", async () => 
   assert.equal(result.isError, undefined, result.content[0].text);
   assert.deepEqual(seen, ["GET https://example.test/v1/agents/agt_1/webhook/deliveries?limit=20"]);
   assert.match(result.content[0].text, /sms\.received → delivered \(200\) id=dlv_1/);
-  assert.match(result.content[0].text, /Total: 1/);
+  assert.doesNotMatch(result.content[0].text, /Total:/);
+  assert.equal(result.structuredContent.total, undefined);
 });

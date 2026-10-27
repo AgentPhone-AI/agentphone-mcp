@@ -476,7 +476,7 @@ export class AgentPhoneAPI {
     let path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
     if (hours !== undefined) path += `&hours=${hours}`;
     const rows = await this.request<WebhookDelivery[]>("GET", path);
-    return { data: rows, total: rows.length };
+    return { data: rows };
   }
 
   // --- Calls ---
