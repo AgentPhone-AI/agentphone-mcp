@@ -369,5 +369,5 @@ test("list_webhook_deliveries reads the documented agent response", async () => 
   assert.deepEqual(seen, ["GET https://example.test/v1/agents/agt_1/webhook/deliveries?limit=20"]);
   assert.match(result.content[0].text, /sms\.received → delivered \(200\) id=dlv_1/);
   assert.doesNotMatch(result.content[0].text, /Total:/);
-  assert.equal(result.structuredContent.total, undefined);
+  assert.equal(Object.hasOwn(result.structuredContent, "total"), false);
 });
