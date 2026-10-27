@@ -13,6 +13,15 @@ const LONG_POLL_GRACE_MS = 15_000;
 const GET_CALL_MAX_WAIT_SECONDS = 300;
 const CONVERSATION_CALL_MAX_WAIT_SECONDS = 600;
 
+type WebhookDelivery = {
+  id: string;
+  eventType: string | null;
+  status: string;
+  httpStatus: number | null;
+  lastAttemptAt: string | null;
+  createdAt: string;
+};
+
 export class AgentPhoneAPI {
   private baseUrl: string;
   // A static key, or a getter resolved per request (used when the credential
@@ -466,18 +475,8 @@ export class AgentPhoneAPI {
   async listAgentWebhookDeliveries(agentId: string, limit = 20, hours?: number) {
     let path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
     if (hours !== undefined) path += `&hours=${hours}`;
-    return this.request<{
-      data: Array<{
-        id: string;
-        event: string;
-        statusCode: number | null;
-        success: boolean;
-        deliveredAt: string;
-        responseMs: number | null;
-      }>;
-      hasMore: boolean;
-      total: number;
-    }>("GET", path);
+    const rows = await this.request<WebhookDelivery[]>("GET", path);
+    return { data: rows, total: rows.length };
   }
 
   // --- Calls ---
@@ -792,18 +791,8 @@ export class AgentPhoneAPI {
   async listWebhookDeliveries(limit = 20, hours?: number) {
     let path = `/v1/webhooks/deliveries?limit=${limit}`;
     if (hours !== undefined) path += `&hours=${hours}`;
-    return this.request<{
-      data: Array<{
-        id: string;
-        event: string;
-        statusCode: number | null;
-        success: boolean;
-        deliveredAt: string;
-        responseMs: number | null;
-      }>;
-      hasMore: boolean;
-      total: number;
-    }>("GET", path);
+    const page = await this.request<{ items: WebhookDelivery[]; total: number }>("GET", path);
+    return { data: page.items, total: page.total };
   }
 
   // --- Usage ---

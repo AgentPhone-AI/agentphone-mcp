@@ -1706,7 +1706,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         const formatted = result.data
           .map(
             (d) =>
-              `[${d.deliveredAt}] ${d.event} → ${d.success ? "OK" : "FAILED"} (${d.statusCode ?? "N/A"}, ${d.responseMs ?? "N/A"}ms) id=${d.id}`
+              `[${d.lastAttemptAt ?? d.createdAt}] ${d.eventType ?? "unknown"} → ${d.status} (${d.httpStatus ?? "N/A"}) id=${d.id}`
           )
           .join("\n");
 
