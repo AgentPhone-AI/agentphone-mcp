@@ -861,7 +861,7 @@ export class ApiError extends Error {
     public readonly path: string,
     public readonly detail: string,
     // The server's Retry-After header (seconds or HTTP date), when present —
-    // surfaced on 429/503 so callers back off for the advised time.
+    // surfaced on 429 so callers back off for the advised time (see err()).
     public readonly retryAfter: string | null = null
   ) {
     super(`AgentPhone API ${method} ${path} failed (${status}): ${detail}`);
@@ -874,7 +874,9 @@ export class ApiError extends Error {
 function redactSecrets(text: string): string {
   return text
     .replace(/\b(sk|rk)_[A-Za-z0-9_-]{6,}/g, "$1_***")
-    .replace(/\bBearer\s+[A-Za-z0-9._-]{6,}/gi, "Bearer ***");
+    // RFC 6750 bearer tokens allow A-Z a-z 0-9 - . _ ~ + / =, so match the full
+    // set (not just word chars) or a token with these could be partly exposed.
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer ***");
 }
 
 // Turn the backend's error envelope into one actionable line. Handles the

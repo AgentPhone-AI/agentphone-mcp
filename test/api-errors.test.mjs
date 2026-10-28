@@ -72,3 +72,25 @@ test(
     });
   })
 );
+
+// #197 finding 13: redaction and non-JSON fallback paths.
+test(
+  "redacts a Bearer token with the full RFC 6750 charset",
+  withErrorResponse(400, { detail: "got Bearer abc+def/ghi=123~x used" }, null, async (api) => {
+    await assert.rejects(api.listNumbers(1), (e) => {
+      assert.doesNotMatch(e.detail, /abc\+def/);
+      assert.match(e.detail, /Bearer \*\*\*/);
+      return true;
+    });
+  })
+);
+
+test(
+  "keeps a non-JSON error body as text",
+  withErrorResponse(502, "upstream exploded", null, async (api) => {
+    await assert.rejects(api.listNumbers(1), (e) => {
+      assert.match(e.detail, /upstream exploded/);
+      return true;
+    });
+  })
+);

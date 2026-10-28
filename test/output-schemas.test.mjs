@@ -134,6 +134,16 @@ test("input schemas enforce canonical bounds and enums (#197)", () => {
   assert.equal(schemas.list_numbers.safeParse({ limit: 50 }).success, true);
   assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 1.5 }).success, true);
   assert.equal(schemas.list_calls.safeParse({ direction: "inbound" }).success, true);
+  // exact edges (catch off-by-one bound changes)
+  assert.equal(schemas.list_numbers.safeParse({ limit: 100 }).success, true, "limit 100 at max");
+  assert.equal(schemas.list_numbers.safeParse({ limit: 101 }).success, false, "limit 101 over max");
+  assert.equal(schemas.list_numbers.safeParse({ limit: 1 }).success, true, "limit 1 at min");
+  assert.equal(schemas.list_numbers.safeParse({ limit: 0 }).success, false, "limit 0 under min");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 2 }).success, true, "voice_speed 2 at max");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 2.01 }).success, false, "voice_speed over max");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 0.5 }).success, true, "voice_speed 0.5 at min");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", max_silence_ms: 10000 }).success, true, "max_silence_ms at min");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", max_silence_ms: 9999 }).success, false, "max_silence_ms under min");
 });
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
