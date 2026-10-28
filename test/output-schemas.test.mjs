@@ -25,7 +25,7 @@ const conv = { id: "conv_1", agentId: null, phoneNumberId: "num_1", phoneNumber:
 const convFull = { ...conv, messages: [{ id: "m1", body: "hi", fromNumber: "+1310", toNumber: "+1415", direction: "inbound", receivedAt: "t" }] };
 const contact = { id: "ct_1", phoneNumber: "+1310", name: "Jo", email: null, notes: null, createdAt: "t", updatedAt: "t" };
 const webhook = { id: "wh_1", url: "https://x", secret: "whsec_realish", status: "active", contextLimit: 10, createdAt: "t" };
-const delivery = { id: "d1", event: "message", statusCode: 200, success: true, deliveredAt: "t", responseMs: 42 };
+const delivery = { id: "d1", messageId: null, eventType: "sms.received", channel: "sms", status: "delivered", httpStatus: null, errorMessage: null, responseBody: null, attemptCount: 1, lastAttemptAt: null, nextRetryAt: null, createdAt: "t" };
 const voice = { voice_id: "v1", voice_name: "Skylar", provider: "p", gender: "f", accent: "us", preview_audio_url: null };
 const msg = { id: "m1", from: "+1415", to: "+1310", body: "hi", receivedAt: "t" };
 const usage = { numbers: { used: 1, limit: 5, remaining: 4 }, stats: { totalMessages: 1, messagesLast24h: 0, messagesLast7d: 0, messagesLast30d: 0, smsSegmentsLast30d: 0, totalCalls: 0, callsLast24h: 0, callsLast7d: 0, callsLast30d: 0, totalWebhookDeliveries: 0, successfulWebhookDeliveries: 0, failedWebhookDeliveries: 0 }, periodStart: "t", periodEnd: "t" };
@@ -135,6 +135,18 @@ test("each handler's structuredContent validates against its output schema", asy
     const parsed = OUTPUT_SCHEMAS[name].safeParse(r.structuredContent);
     assert.ok(parsed.success, `${name}: structuredContent failed schema: ${parsed.success ? "" : JSON.stringify(parsed.error.issues)}`);
   }
+});
+
+test("list_webhook_deliveries advertises the documented delivery fields", () => {
+  const entry = OUTPUT_SCHEMAS.list_webhook_deliveries.shape.data.element.shape;
+  for (const field of ["eventType", "status", "httpStatus", "lastAttemptAt", "createdAt"]) {
+    assert.ok(entry[field], `missing ${field}`);
+  }
+  assert.equal(entry.eventType.safeParse(null).success, true);
+  assert.equal(entry.httpStatus.safeParse(null).success, true);
+  assert.equal(entry.lastAttemptAt.safeParse(null).success, true);
+  assert.equal(entry.status.safeParse(null).success, false);
+  assert.equal(entry.createdAt.safeParse(null).success, false);
 });
 
 test("make_conversation_call wait=true text matches ended/transcript state", async () => {

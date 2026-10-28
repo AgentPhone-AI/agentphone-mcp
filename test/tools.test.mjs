@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 import { registerTools } from "../dist/tools.js";
+import { AgentPhoneAPI } from "../dist/api.js";
 
 /**
  * Handler-level tests. registerTools() is given a registrar that records each
@@ -306,4 +307,67 @@ test("a missing signing secret is not invented as an empty value", async () => {
   const result = await h.call("get_webhook", {});
   assert.notEqual(result.isError, true);
   assert.equal(Object.hasOwn(JSON.parse(result.content[0].text), "secret"), false);
+});
+
+// ---------------------------------------------------------------------------
+// list_webhook_deliveries uses the documented delivery response shape
+// ---------------------------------------------------------------------------
+
+const DELIVERY = {
+  id: "dlv_1",
+  messageId: "msg_1",
+  eventType: "sms.received",
+  channel: "sms",
+  status: "delivered",
+  httpStatus: 200,
+  errorMessage: null,
+  responseBody: "ok",
+  attemptCount: 1,
+  lastAttemptAt: "2026-10-01T12:00:00Z",
+  nextRetryAt: null,
+  createdAt: "2026-10-01T12:00:00Z",
+};
+const FAILED_DELIVERY = { ...DELIVERY, id: "dlv_2", eventType: "call.ended", status: "failed", httpStatus: 502, lastAttemptAt: null };
+
+async function withDeliveryFetch(payload, run) {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push(`${init.method} ${url}`);
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    return { seen, result: await run() };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("list_webhook_deliveries reads the documented project response", async () => {
+  const payload = { items: [DELIVERY, FAILED_DELIVERY], total: 2, offset: 0, limit: 20 };
+  const { seen, result } = await withDeliveryFetch(payload, () =>
+    harness(new AgentPhoneAPI("https://example.test", "key")).call("list_webhook_deliveries", {})
+  );
+  assert.equal(result.isError, undefined, result.content[0].text);
+  assert.deepEqual(seen, ["GET https://example.test/v1/webhooks/deliveries?limit=20"]);
+  assert.match(result.content[0].text, /\[2026-10-01T12:00:00Z\] sms\.received → delivered \(200\) id=dlv_1/);
+  assert.match(result.content[0].text, /\[2026-10-01T12:00:00Z\] call\.ended → failed \(502\) id=dlv_2/);
+  assert.match(result.content[0].text, /Total: 2/);
+  assert.equal(result.structuredContent.data[0].messageId, "msg_1");
+  assert.equal(result.structuredContent.data[0].channel, "sms");
+  assert.equal(result.structuredContent.data[0].attemptCount, 1);
+});
+
+test("list_webhook_deliveries reads the documented agent response", async () => {
+  const { seen, result } = await withDeliveryFetch([DELIVERY], () =>
+    harness(new AgentPhoneAPI("https://example.test", "key")).call("list_webhook_deliveries", { agent_id: "agt_1" })
+  );
+  assert.equal(result.isError, undefined, result.content[0].text);
+  assert.deepEqual(seen, ["GET https://example.test/v1/agents/agt_1/webhook/deliveries?limit=20"]);
+  assert.match(result.content[0].text, /sms\.received → delivered \(200\) id=dlv_1/);
+  assert.doesNotMatch(result.content[0].text, /Total:/);
+  assert.equal(Object.hasOwn(result.structuredContent, "total"), false);
 });
