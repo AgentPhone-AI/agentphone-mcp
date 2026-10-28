@@ -72,13 +72,16 @@ test("MCP schemas advertise timestamp cursors for messages and offsets for agent
 
 test("message pages advance using the exact timestamp returned by the backend", async (t) => {
   const { client, requests } = await connect(t);
-  const first = text(await client.callTool({
+  const firstResult = await client.callTool({
     name: "get_messages", arguments: { number_id: "number/with spaces", limit: 2 },
-  }));
+  });
+  const first = text(firstResult);
   assert.match(first, /Newest/);
   assert.match(first, /Middle/);
   assert.doesNotMatch(first, /Oldest/);
   assert.match(first, /More messages/);
+  assert.match(first, /Messages sharing that timestamp may be skipped/);
+  assert.deepEqual(firstResult.structuredContent.data, messages.slice(0, 2));
   assert.ok(first.includes(`before="${messages[1].receivedAt}"`));
 
   const second = text(await client.callTool({
@@ -136,19 +139,23 @@ test("complete message pages do not advertise another page", async (t) => {
 
 test("empty filtered pages do not imply the number has never received messages", async (t) => {
   const { client } = await connect(t);
-  const result = text(await client.callTool({
+  const response = await client.callTool({
     name: "get_messages", arguments: { number_id: "n1", before: "2026-01-01T00:00:00Z" },
-  }));
+  });
+  const result = text(response);
   assert.match(result, /No messages found.*time range/);
   assert.doesNotMatch(result, /More messages/);
+  assert.deepEqual(response.structuredContent.data, []);
 });
 
 test("agents advance with offset while preserving the total", async (t) => {
   const { client, requests } = await connect(t);
-  const result = JSON.parse(text(await client.callTool({
+  const response = await client.callTool({
     name: "list_agents", arguments: { limit: 2, offset: 2 },
-  })));
+  });
+  const result = JSON.parse(text(response));
   assert.deepEqual(result, { data: [{ id: "a3" }], total: 3 });
+  assert.deepEqual(response.structuredContent, result);
   assert.equal(requests[0].url.searchParams.get("offset"), "2");
   assert.equal(requests[0].url.searchParams.get("limit"), "2");
 });

@@ -5,6 +5,14 @@
  * Used by the MCP server to proxy tool calls to the backend.
  */
 
+// Extra time the client keeps the socket open past the server-side long-poll
+// wait, so a call that runs to its full wait is not aborted just before the
+// response lands.
+const LONG_POLL_GRACE_MS = 15_000;
+// Server-side maximums, used when the caller does not pass an explicit wait.
+const GET_CALL_MAX_WAIT_SECONDS = 300;
+const CONVERSATION_CALL_MAX_WAIT_SECONDS = 600;
+
 export class AgentPhoneAPI {
   private baseUrl: string;
   // A static key, or a getter resolved per request (used when the credential
@@ -53,8 +61,11 @@ export class AgentPhoneAPI {
         throw new ApiError(res.status, method, path, detail);
       }
 
-      if (res.status === 204) return {} as T;
-      return res.json() as Promise<T>;
+      // Treat any empty body as {} — not just 204. A 200 with no content (which
+      // some DELETE endpoints return) would otherwise throw from res.json().
+      const text = await res.text();
+      if (!text) return {} as T;
+      return JSON.parse(text) as T;
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") {
         throw new ApiError(0, method, path, `Request timed out after ${timeout}ms`);
@@ -63,6 +74,16 @@ export class AgentPhoneAPI {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  // DELETE endpoints may answer 204 with no body, for which request() returns
+  // {}. request() rejects on any non-2xx, so a value here means the delete
+  // succeeded — normalize to an explicit { success: true } that callers and the
+  // tools' output schemas rely on (otherwise a 204 yields {} and fails
+  // structuredContent validation).
+  private async deleteExpectingSuccess(path: string): Promise<{ success: boolean }> {
+    await this.request("DELETE", path);
+    return { success: true };
   }
 
   // --- Numbers ---
@@ -350,8 +371,7 @@ export class AgentPhoneAPI {
   }
 
   async detachNumber(agentId: string, numberId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
+    return this.deleteExpectingSuccess(
       `/v1/agents/${encodeURIComponent(agentId)}/numbers/${encodeURIComponent(numberId)}`
     );
   }
@@ -434,10 +454,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteAgentWebhook(agentId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
-      `/v1/agents/${encodeURIComponent(agentId)}/webhook`
-    );
+    return this.deleteExpectingSuccess(`/v1/agents/${encodeURIComponent(agentId)}/webhook`);
   }
 
   async testAgentWebhook(agentId: string) {
@@ -502,7 +519,15 @@ export class AgentPhoneAPI {
     if (opts?.timeout) params.push(`timeout=${opts.timeout}`);
     if (params.length) path += `?${params.join("&")}`;
 
-    const fetchTimeout = opts?.wait ? 300_000 : undefined;
+    // Size the client abort timer from the requested wait, but clamp it to the
+    // server's own maximum. The input schema no longer bounds `timeout`, so this
+    // keeps an out-of-range value (e.g. 999999) from holding the socket open far
+    // longer than the server would ever wait; the API still validates the value.
+    const fetchTimeout = opts?.wait
+      ? Math.min(opts.timeout || GET_CALL_MAX_WAIT_SECONDS, GET_CALL_MAX_WAIT_SECONDS) *
+          1000 +
+        LONG_POLL_GRACE_MS
+      : undefined;
 
     return this.request<{
       id: string;
@@ -562,7 +587,18 @@ export class AgentPhoneAPI {
     if (fromNumberId !== undefined) body.fromNumberId = fromNumberId;
     if (voice !== undefined) body.voice = voice;
 
-    const fetchTimeout = waitForCompletion ? 600_000 : undefined;
+    // Clamp the client abort timer to the server's maximum. The input schema no
+    // longer bounds max_wait_seconds, so this keeps an out-of-range value from
+    // holding the socket open far longer than the server would ever wait (the
+    // API still validates the raw value in the body).
+    const fetchTimeout = waitForCompletion
+      ? Math.min(
+          maxWaitSeconds ?? CONVERSATION_CALL_MAX_WAIT_SECONDS,
+          CONVERSATION_CALL_MAX_WAIT_SECONDS
+        ) *
+          1000 +
+        LONG_POLL_GRACE_MS
+      : undefined;
 
     return this.request<{
       id: string;
@@ -712,10 +748,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteContact(contactId: string) {
-    return this.request<{ success: boolean }>(
-      "DELETE",
-      `/v1/contacts/${encodeURIComponent(contactId)}`
-    );
+    return this.deleteExpectingSuccess(`/v1/contacts/${encodeURIComponent(contactId)}`);
   }
 
   // --- Webhooks ---
@@ -747,7 +780,7 @@ export class AgentPhoneAPI {
   }
 
   async deleteWebhook() {
-    return this.request<{ success: boolean }>("DELETE", "/v1/webhooks");
+    return this.deleteExpectingSuccess("/v1/webhooks");
   }
 
   async testWebhook() {

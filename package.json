@@ -1,6 +1,6 @@
 {
   "name": "agentphone-mcp",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "mcpName": "io.github.AgentPhone-AI/agentphone",
   "description": "MCP server for AgentPhone — give AI agents phone numbers, SMS, and voice calls",
   "type": "module",
@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "mcp-use": "^1.33.0",
+    "mcp-use": "1.34.8",
     "zod": "^4.4.3"
   },
   "overrides": {
