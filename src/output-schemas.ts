@@ -193,10 +193,10 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       sectionStatus: z
         .object({
-          agents: z.enum(["ok", "failed"]),
-          numbers: z.enum(["ok", "failed"]),
-          webhook: z.enum(["ok", "failed"]),
-          usage: z.enum(["ok", "failed"]),
+          agents: z.enum(["ok", "failed"]).describe("Whether the agents section loaded."),
+          numbers: z.enum(["ok", "failed"]).describe("Whether the phone-numbers section loaded."),
+          webhook: z.enum(["ok", "failed"]).describe("Whether the webhook section loaded."),
+          usage: z.enum(["ok", "failed"]).describe("Whether the usage section loaded."),
         })
         .describe("Per-section load status; a 'failed' section means its data could not be loaded, not that it's empty."),
       usage: usageNumbers.nullable().optional().describe("Phone-number usage; omitted if the lookup failed."),
