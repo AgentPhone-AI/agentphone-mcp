@@ -1677,7 +1677,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "list_webhook_deliveries",
     "View recent webhook delivery history. Shows which events were delivered, HTTP status codes, and timing.\n\n" +
-      "Pass agent_id to see deliveries for that agent's webhook. Omit for project-level.",
+      "Pass agent_id to see deliveries for that agent's webhook. Omit for project-level. " +
+      "The hours time filter is supported only for project-level history.",
     {
       agent_id: z
         .string()
@@ -1690,13 +1691,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       hours: z
         .number()
         .optional()
-        .describe("Only include deliveries from the last N hours. If omitted, deliveries are returned regardless of age."),
+        .describe("Project-level history only: include deliveries from the last N hours. Cannot be combined with agent_id. If omitted, deliveries are returned regardless of age."),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, limit, hours }) => {
+      if (agent_id && hours !== undefined) {
+        return err(new Error("hours is supported only for project-level webhook history. Omit agent_id to use hours, or omit hours to list recent deliveries for this agent."));
+      }
       try {
         const result = agent_id
-          ? await api.listAgentWebhookDeliveries(agent_id, limit, hours)
+          ? await api.listAgentWebhookDeliveries(agent_id, limit)
           : await api.listWebhookDeliveries(limit, hours);
 
         if (result.data.length === 0) {
