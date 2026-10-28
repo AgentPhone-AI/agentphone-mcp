@@ -119,6 +119,23 @@ const ARGS = {
   list_webhook_deliveries: {},
 };
 
+test("input schemas enforce canonical bounds and enums (#197)", () => {
+  const schemas = {};
+  registerTools({ tool: (name, _d, schema) => { schemas[name] = z.object(schema); } }, makeStub());
+  // out of range / wrong type -> rejected
+  assert.equal(schemas.list_numbers.safeParse({ limit: 201 }).success, false, "limit 201");
+  assert.equal(schemas.list_numbers.safeParse({ limit: 1.5 }).success, false, "non-integer limit");
+  assert.equal(schemas.list_numbers.safeParse({ offset: -1 }).success, false, "negative offset");
+  assert.equal(schemas.get_messages.safeParse({ number_id: "n", limit: 201 }).success, false, "messages limit 201");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 9 }).success, false, "voice_speed 9");
+  assert.equal(schemas.create_agent.safeParse({ name: "x", max_silence_ms: 1 }).success, false, "max_silence_ms 1");
+  assert.equal(schemas.list_calls.safeParse({ direction: "sideways" }).success, false, "bad direction enum");
+  // valid values accepted
+  assert.equal(schemas.list_numbers.safeParse({ limit: 50 }).success, true);
+  assert.equal(schemas.create_agent.safeParse({ name: "x", voice_speed: 1.5 }).success, true);
+  assert.equal(schemas.list_calls.safeParse({ direction: "inbound" }).success, true);
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
   assert.equal(registered.size, 28);
