@@ -279,7 +279,7 @@ export class AgentPhoneAPI {
       voiceSpeed: number;
       language: string;
       createdAt: string;
-      numbers: Array<{ id: string; phoneNumber: string; status: string }> | null;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
     }>("POST", "/v1/agents", params);
   }
 
