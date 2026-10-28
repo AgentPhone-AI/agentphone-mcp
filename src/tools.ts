@@ -173,16 +173,17 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         // overview — surface it as an error so it isn't mistaken for an empty
         // account. (Partial failures are still reported inline below.)
         if (results.every((r) => r.status === "rejected")) {
-          const firstErr = results.find((r) => r.status === "rejected") as
-            | PromiseRejectedResult
-            | undefined;
-          const reason =
-            firstErr?.reason instanceof Error ? firstErr.reason.message : String(firstErr?.reason);
-          return err(
-            new Error(
-              `Account overview failed: every lookup errored (agents, numbers, webhook, usage). ${reason}`
-            )
-          );
+          const reason = (results[0] as PromiseRejectedResult).reason;
+          // Preserve the original error so err() keeps its ApiError status hints
+          // (401 credential, 429 rate limit, timeout), rather than flattening it.
+          return reason instanceof ApiError
+            ? err(reason)
+            : err(
+                new Error(
+                  "Account overview failed: every lookup errored (agents, numbers, webhook, usage). " +
+                    (reason instanceof Error ? reason.message : String(reason))
+                )
+              );
         }
 
         const agents = results[0].status === "fulfilled" ? results[0].value : null;
@@ -567,7 +568,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map((m) => `[${m.receivedAt}] ${m.from ?? "unknown"} → ${m.to}: ${m.body}`)
+          .map((m) => `[${m.receivedAt}] ${m.from ?? "unknown"} → ${m.to ?? "unknown"}: ${m.body}`)
           .join("\n");
 
         return ok(`${result.data.length} message(s):\n\n${formatted}`, result);

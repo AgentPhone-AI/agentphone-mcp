@@ -151,7 +151,7 @@ export class AgentPhoneAPI {
     // for any older shape).
     return {
       ...res,
-      data: res.data.map(({ from_, ...m }) => ({ ...m, from: m.from ?? from_ ?? null })),
+      data: res.data.map(({ from_, ...m }) => ({ ...m, from: from_ ?? m.from ?? null })),
     };
   }
 

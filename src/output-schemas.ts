@@ -193,14 +193,12 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       sectionStatus: z
         .object({
-          agents: z.string().optional(),
-          numbers: z.string().optional(),
-          webhook: z.string().optional(),
-          usage: z.string().optional(),
+          agents: z.enum(["ok", "failed"]),
+          numbers: z.enum(["ok", "failed"]),
+          webhook: z.enum(["ok", "failed"]),
+          usage: z.enum(["ok", "failed"]),
         })
-        .passthrough()
-        .optional()
-        .describe("Per-section load status ('ok' or 'failed'); a failed section means its data could not be loaded, not that it's empty."),
+        .describe("Per-section load status; a 'failed' section means its data could not be loaded, not that it's empty."),
       usage: usageNumbers.nullable().optional().describe("Phone-number usage; omitted if the lookup failed."),
       agents: z.array(agentObject).nullable().optional().describe("The account's agents (omitted if the lookup failed)."),
       numbers: z.array(z.object(numberFields).passthrough().describe("A phone number in the account.")).nullable().optional().describe("The account's phone numbers (omitted if the lookup failed)."),
