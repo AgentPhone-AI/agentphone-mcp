@@ -134,16 +134,25 @@ export class AgentPhoneAPI {
   // --- SMS / Messages ---
 
   async getMessages(numberId: string, limit = 50) {
-    return this.request<{
+    const res = await this.request<{
       data: Array<{
         id: string;
-        from: string;
+        from?: string | null;
+        // The deployed MessageResponse exposes the sender as `from_`.
+        from_?: string | null;
         to: string;
         body: string;
         receivedAt: string;
       }>;
       hasMore: boolean;
     }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}`);
+    // Normalize the sender to `from` so the formatter and output schema have a
+    // single, explicit field (the API returns `from_`; keep `from` as a fallback
+    // for any older shape).
+    return {
+      ...res,
+      data: res.data.map(({ from_, ...m }) => ({ ...m, from: m.from ?? from_ ?? null })),
+    };
   }
 
   async sendMessage(params: {
