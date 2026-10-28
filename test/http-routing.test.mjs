@@ -240,18 +240,41 @@ async function startFakeBackend(t, respond) {
   return { seen, url: `http://localhost:${backend.address().port}` };
 }
 
-async function callOverHttp(origin, toolName, headers = {}) {
+async function callOverHttp(origin, toolName, headers = {}, toolArguments = {}) {
   const transport = new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), {
     requestInit: { headers },
   });
   const client = new Client({ name: "test", version: "0.0.0" });
   try {
     await client.connect(transport);
-    return await client.callTool({ name: toolName, arguments: {} });
+    return await client.callTool({ name: toolName, arguments: toolArguments });
   } finally {
     await client.close();
   }
 }
+
+test("production HTTP tool calls use concise validation on mcp-use's native server", async (t) => {
+  const { child, logs, origin } = await startHttpServer(t);
+  await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+
+  try {
+    const result = await callOverHttp(
+      origin,
+      "get_messages",
+      { Authorization: "Bearer test-token" },
+      { number_id: 5 },
+    );
+
+    assert.equal(result.isError, true);
+    assert.match(
+      result.content[0].text,
+      /Invalid arguments for get_messages: number_id must be a string/,
+    );
+    assert.doesNotMatch(result.content[0].text, /invalid_type|"expected"/);
+  } catch (error) {
+    throw new Error(`${error.message}\nServer output:\n${logs()}`, { cause: error });
+  }
+});
 
 test("an unauthenticated tool call is rejected and never reaches the backend", async (t) => {
   const backend = await startFakeBackend(t);
