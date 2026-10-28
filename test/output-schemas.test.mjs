@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { registerTools } from "../dist/tools.js";
 import { OUTPUT_SCHEMAS } from "../dist/output-schemas.js";
+import { ApiError } from "../dist/api.js";
 
 // Every tool declares an outputSchema, so the SDK validates each successful
 // result's structuredContent against it on every call. This drives the REAL
@@ -118,6 +119,22 @@ const ARGS = {
   test_webhook: {},
   list_webhook_deliveries: {},
 };
+
+test("timeouts: outcome-unknown for mutations, safe retry for reads (#198)", async () => {
+  // A mutation (POST) timeout must not advise a blind retry.
+  let h = harness(makeStub({ sendMessage: async () => { throw new ApiError(0, "POST", "/v1/messages", "Request timed out after 30000ms"); } }));
+  let r = await h.call("send_message", { agent_id: "a", to_number: "+14155550123", body: "hi" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /outcome is UNKNOWN/);
+  assert.match(r.content[0].text, /Do NOT blindly retry/);
+
+  // A read (GET) timeout is safe to retry.
+  h = harness(makeStub({ getCall: async () => { throw new ApiError(0, "GET", "/v1/calls/call_1", "Request timed out"); } }));
+  r = await h.call("get_call", { call_id: "call_1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /retry, or pass a longer timeout/);
+  assert.doesNotMatch(r.content[0].text, /UNKNOWN/);
+});
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
