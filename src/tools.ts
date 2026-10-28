@@ -542,26 +542,32 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .datetime({ offset: true })
         .optional()
         .describe("Return messages after this ISO timestamp"),
-      cursor: z.string().optional().describe("Opaque nextCursor returned by a previous page; takes precedence over before/after"),
+      cursor: z.string().min(1).optional().describe("Nonempty opaque nextCursor returned by a previous page; takes precedence over before/after"),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ number_id, limit, before, after, cursor }) => {
       try {
         const result = await api.getMessages(number_id, limit, before, after, cursor);
-        if (result.data.length === 0) {
-          return ok(before || after || cursor
-            ? "No messages found for this number in the requested time range."
-            : "No messages found for this number.", result);
-        }
-
         const formatted = result.data
           .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
           .join("\n");
+        const summary = result.data.length > 0
+          ? `${result.data.length} message(s):\n\n${formatted}`
+          : cursor !== undefined
+            ? "No messages found on this page."
+            : before || after
+              ? "No messages found for this number in the requested time range."
+              : "No messages found for this number.";
 
-        const nextPage = result.hasMore && result.nextCursor != null
-          ? `\n\nMore messages available. Use the same number_id with cursor=${JSON.stringify(result.nextCursor)} to fetch the next page.`
-          : result.hasMore ? "\n\nMore messages are available, but the API did not return a next cursor." : "";
-        return ok(`${result.data.length} message(s):\n\n${formatted}${nextPage}`, result);
+        let nextPage = "";
+        if (result.hasMore) {
+          nextPage = result.nextCursor
+            ? `\n\nMore messages available. Use the same number_id with cursor=${JSON.stringify(result.nextCursor)} to fetch the next page.`
+            : "\n\nMore messages are available, but the API did not return a usable next cursor. " +
+              "To inspect a narrower time range, omit cursor and use before/after filters. " +
+              "Timestamp filters can skip messages sharing a page boundary and cannot guarantee complete history.";
+        }
+        return ok(summary + nextPage, result);
       } catch (e) {
         return err(e);
       }

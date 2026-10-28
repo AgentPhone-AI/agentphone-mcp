@@ -538,6 +538,49 @@ test("HTTP and stdio enforce webhook defaults and reaction validation through th
   }
 });
 
+test("HTTP message pagination preserves cursors and structured output through the real SDK", async (t) => {
+  const cursor = "next/+ =page";
+  const entries = ["first", "second"].map((id) => ({
+    id, from: "sender", to: "agent", body: id, receivedAt: "2026-10-13T12:00:00Z",
+  }));
+  const requests = [];
+  const backend = await startFakeBackend(t, (req, res) => {
+    const url = new URL(req.url, "http://localhost");
+    requests.push(url);
+    const last = url.searchParams.get("cursor") === cursor;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ data: [entries[last ? 1 : 0]], hasMore: !last, nextCursor: last ? null : cursor }));
+  });
+  const { child, origin } = await startHttpServer(t, { AGENTPHONE_BASE_URL: backend.url });
+  await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+  const client = new Client({ name: "pagination-http-test", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), {
+    requestInit: { headers: { Authorization: "Bearer caller-key" } },
+  }));
+  const tool = (await client.listTools()).tools.find((tool) => tool.name === "get_messages");
+  assert.equal(tool.inputSchema.properties.cursor.minLength, 1);
+  assert.ok(tool.outputSchema.properties.nextCursor.anyOf.some((schema) => schema.type === "null"));
+  const first = await client.callTool({ name: "get_messages", arguments: { number_id: "n/1", limit: 1 } });
+  assert.notEqual(first.isError, true);
+  assert.equal(first.structuredContent.nextCursor, cursor);
+  assert.ok(first.content[0].text.includes(`cursor=${JSON.stringify(cursor)}`));
+  const last = await client.callTool({ name: "get_messages", arguments: {
+    number_id: "n/1", limit: 1, cursor: first.structuredContent.nextCursor,
+  } });
+  assert.notEqual(last.isError, true);
+  assert.deepEqual([...first.structuredContent.data, ...last.structuredContent.data], entries);
+  assert.equal(last.structuredContent.nextCursor, null);
+  assert.equal(last.structuredContent.hasMore, false);
+  assert.doesNotMatch(last.content[0].text, /More messages|cursor=/);
+  assert.equal(requests[1].pathname, "/v1/numbers/n%2F1/messages");
+  assert.equal(requests[1].searchParams.get("cursor"), cursor);
+  const invalid = await client.callTool({ name: "get_messages", arguments: { number_id: "n/1", cursor: "" } });
+  assert.equal(invalid.isError, true);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(backend.seen, ["Bearer caller-key", "Bearer caller-key"]);
+});
+
 test("stdio rejects a whitespace-only API key before any backend call", async (t) => {
   const backend = await startFakeBackend(t);
   const transport = new StdioClientTransport({

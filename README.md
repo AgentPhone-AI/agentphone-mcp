@@ -162,7 +162,7 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `send_message` | Send SMS or iMessage. Supports media, threaded replies (`reply_to_message_id`), iMessage send effects (`send_style`), and group chats |
-| `get_messages` | Get messages for a specific number; paginate with `nextCursor` and optionally filter by `before`/`after` ISO timestamps. |
+| `get_messages` | Get messages for a specific number; pass the previous response's `nextCursor` as `cursor` to fetch the next page. Optional `before`/`after` ISO timestamp filters apply when no cursor is supplied. |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with full message history |
 | `update_conversation` | Set metadata on a conversation |
