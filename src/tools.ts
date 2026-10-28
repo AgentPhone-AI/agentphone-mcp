@@ -1643,30 +1643,35 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "test_webhook",
-    "Send a test event to verify a webhook is working. Returns the HTTP status code and response time.\n\n" +
-      "Pass agent_id to test that agent's webhook. Omit to test the project-level webhook.",
+    "Send a test event to a configured webhook and report whether your endpoint accepted it. " +
+      "Returns success, the HTTP status your endpoint returned, and any error message.\n\n" +
+      "Pass agent_id to test that agent's webhook. Omit to test the project-level webhook. Each " +
+      "call dispatches a real event to your endpoint, so it is not a no-op to repeat.",
     {
       agent_id: z
         .string()
         .optional()
         .describe("Agent ID to test that agent's webhook. Omit for project-level."),
     },
-    { idempotentHint: true, openWorldHint: true },
+    // Not idempotent: each call sends a fresh external event to the endpoint.
+    { openWorldHint: true },
     async ({ agent_id }) => {
       try {
         const result = agent_id
           ? await api.testAgentWebhook(agent_id)
           : await api.testWebhook();
         const scope = agent_id ? "Agent webhook" : "Webhook";
+        // The deployed endpoints return httpStatus/errorMessage; fall back to the
+        // older statusCode/error names so either shape formats correctly.
+        const httpStatus = result.httpStatus ?? result.statusCode ?? null;
+        const errorMessage = result.errorMessage ?? result.error ?? null;
+        const normalized = { success: result.success, httpStatus, errorMessage };
         if (result.success) {
-          return ok(
-            `${scope} test successful!\n  Status code: ${result.statusCode}\n  Response time: ${result.responseMs}ms`,
-            result
-          );
+          return ok(`${scope} test succeeded.\n  HTTP status: ${httpStatus ?? "n/a"}`, normalized);
         }
         return ok(
-          `${scope} test failed.\n  Error: ${result.error}\n  Status code: ${result.statusCode}`,
-          result
+          `${scope} test failed.\n  HTTP status: ${httpStatus ?? "n/a"}\n  Error: ${errorMessage ?? "none reported"}`,
+          normalized
         );
       } catch (e) {
         return err(e);
