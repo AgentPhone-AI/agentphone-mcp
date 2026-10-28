@@ -71,10 +71,10 @@ function err(error: unknown): ToolResult {
         // a send, charge or create). Reads are safe to retry.
         hint =
           error.method !== "GET"
-            ? " The request timed out before the server responded, so the outcome is UNKNOWN — the" +
-              " action may or may not have taken effect. Do NOT blindly retry, which could" +
-              " duplicate it. Check the current state first (e.g. the matching list_* or get_*" +
-              " tool), then retry only if it did not apply."
+            ? " The request timed out, so the outcome is UNKNOWN — the action may or may not have" +
+              " taken effect. Do NOT blindly retry, which could duplicate it. Check the current" +
+              " state first (e.g. the matching list_* or get_* tool), then retry only if it did" +
+              " not apply."
             : " Request timed out — retry, or pass a longer timeout if the tool supports one.";
         break;
       case 401:
