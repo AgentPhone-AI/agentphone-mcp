@@ -25,7 +25,7 @@ type WebhookDelivery = {
 type WebhookTestResult = {
   success: boolean;
   // The deployed endpoints return httpStatus/errorMessage; the older
-  // statusCode/error/responseMs are kept optional as a compatibility fallback.
+  // statusCode/error are kept optional as a compatibility fallback.
   httpStatus?: number | null;
   errorMessage?: string | null;
   statusCode?: number | null;

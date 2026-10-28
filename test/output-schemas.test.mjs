@@ -129,10 +129,12 @@ test("test_webhook uses the real success/httpStatus/errorMessage contract (#191)
   assert.equal(r.structuredContent.errorMessage, "boom");
   assert.match(r.content[0].text, /500/);
   assert.match(r.content[0].text, /boom/);
-  // Legacy statusCode/error still format via the fallback.
-  h = harness(makeStub({ testWebhook: async () => ({ success: true, statusCode: 204, error: null }) }));
+  // Legacy statusCode/error still normalize into httpStatus/errorMessage.
+  h = harness(makeStub({ testWebhook: async () => ({ success: false, statusCode: 502, error: "legacy boom" }) }));
   r = await h.call("test_webhook", {});
-  assert.equal(r.structuredContent.httpStatus, 204);
+  assert.equal(r.structuredContent.httpStatus, 502);
+  assert.equal(r.structuredContent.errorMessage, "legacy boom");
+  assert.match(r.content[0].text, /legacy boom/);
   assert.ok(OUTPUT_SCHEMAS.test_webhook.safeParse(r.structuredContent).success);
 });
 
@@ -326,9 +328,9 @@ const REQUIRED = {
   attach_number: ["agentId", "number"],
   detach_number: ["success"],
   delete_webhook: ["success"],
-  test_webhook: ["success"],
+  test_webhook: ["success", "httpStatus", "errorMessage"],
 };
-const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, statusCode: null, responseMs: null, error: null };
+const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null };
 
 test("every required output field is enforced (omitting any one fails)", () => {
   for (const [tool, fields] of Object.entries(REQUIRED)) {
