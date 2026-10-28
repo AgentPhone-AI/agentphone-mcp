@@ -229,6 +229,32 @@ test("account_overview reports failed webhook lookup as omitted, not null", asyn
   assert.equal("webhook" in r.structuredContent && r.structuredContent.webhook === null, false);
 });
 
+test("list_voices tolerates null gender/accent and renders readable text (#190)", async () => {
+  const sparse = { voice_id: "v2", voice_name: "Nova", provider: "p", gender: null, accent: null, preview_audio_url: null };
+  const h = harness(makeStub({ listVoices: async () => ({ data: [voice, sparse] }) }));
+  const r = await h.call("list_voices", {});
+  assert.equal(r.isError, undefined, "list_voices should not error on null provider metadata");
+  assert.ok(OUTPUT_SCHEMAS.list_voices.safeParse(r.structuredContent).success, "schema accepts null gender/accent");
+  assert.doesNotMatch(r.content[0].text, /\bnull\b/, "no literal 'null' in display text");
+  assert.match(r.content[0].text, /Nova/);
+});
+
+test("account_overview errors when every section fails (#190)", async () => {
+  const boom = async () => { throw new Error("backend down"); };
+  const h = harness(makeStub({ listAgents: boom, listNumbers: boom, getWebhook: boom, getUsage: boom }));
+  const r = await h.call("account_overview", {});
+  assert.equal(r.isError, true, "all-failed overview must be an error, not an empty account");
+  assert.match(r.content[0].text, /every lookup errored/);
+});
+
+test("account_overview reports section status on partial failure (#190)", async () => {
+  const h = harness(makeStub({ getWebhook: async () => { throw new Error("denied"); } }));
+  const r = await h.call("account_overview", {});
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.sectionStatus.webhook, "failed");
+  assert.equal(r.structuredContent.sectionStatus.agents, "ok");
+});
+
 test("webhook tools mask the signing secret in structuredContent by default", async () => {
   const h = harness(makeStub());
   for (const [name, args] of [["get_webhook", {}], ["set_webhook", { url: "https://example.com/hook" }]]) {
@@ -372,6 +398,11 @@ test("list_agents accepts documented numbers: null", async () => {
 
 test("create_agent accepts documented numbers: null", async () => {
   const r = await callAndValidate("create_agent", { name: "X" }, { createAgent: async () => AGENT_WITHOUT_NUMBERS });
+  assert.equal(r.structuredContent.numbers, null);
+});
+
+test("update_agent accepts documented numbers: null", async () => {
+  const r = await callAndValidate("update_agent", { agent_id: "agt_1" }, { updateAgent: async () => AGENT_WITHOUT_NUMBERS });
   assert.equal(r.structuredContent.numbers, null);
 });
 

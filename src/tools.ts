@@ -178,10 +178,36 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           api.getUsage(),
         ]);
 
+        // When every section fails, don't return a success-looking empty
+        // overview — surface it as an error so it isn't mistaken for an empty
+        // account. (Partial failures are still reported inline below.)
+        if (results.every((r) => r.status === "rejected")) {
+          const reason = (results[0] as PromiseRejectedResult).reason;
+          // Preserve the original error so err() keeps its ApiError status hints
+          // (401 credential, 429 rate limit, timeout), rather than flattening it.
+          return reason instanceof ApiError
+            ? err(reason)
+            : err(
+                new Error(
+                  "Account overview failed: every lookup errored (agents, numbers, webhook, usage). " +
+                    (reason instanceof Error ? reason.message : String(reason))
+                )
+              );
+        }
+
         const agents = results[0].status === "fulfilled" ? results[0].value : null;
         const numbers = results[1].status === "fulfilled" ? results[1].value : null;
         const webhook = results[2].status === "fulfilled" ? results[2].value : null;
         const usage = results[3].status === "fulfilled" ? results[3].value : null;
+
+        // Per-section load status, so a partially-failed overview is explicit in
+        // structured output (not silently missing data).
+        const sectionStatus = {
+          agents: results[0].status === "fulfilled" ? "ok" : "failed",
+          numbers: results[1].status === "fulfilled" ? "ok" : "failed",
+          webhook: results[2].status === "fulfilled" ? "ok" : "failed",
+          usage: results[3].status === "fulfilled" ? "ok" : "failed",
+        };
 
         const sections: string[] = [];
 
@@ -259,6 +285,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         return ok(sections.join("\n"), {
+          sectionStatus,
           usage: usage?.numbers,
           agents: agents?.data,
           numbers: numbers?.data,
@@ -550,7 +577,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
+          .map((m) => `[${m.receivedAt}] ${m.from ?? "unknown"} → ${m.to ?? "unknown"}: ${m.body}`)
           .join("\n");
 
         return ok(`${result.data.length} message(s):\n\n${formatted}`, result);
@@ -1220,10 +1247,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map(
-            (v) =>
-              `${v.voice_id} — ${v.voice_name} (${v.provider}, ${v.gender}, ${v.accent})`
-          )
+          .map((v) => {
+            // Providers may omit gender/accent (null); show only what's present.
+            const meta = [v.provider, v.gender, v.accent].filter(Boolean).join(", ");
+            return `${v.voice_id} — ${v.voice_name}${meta ? ` (${meta})` : ""}`;
+          })
           .join("\n");
 
         return ok(
