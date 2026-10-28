@@ -316,3 +316,47 @@ test("every required output field is enforced (omitting any one fails)", () => {
     }
   }
 });
+
+// AgentResponse.numbers and CallSummary.phoneNumberId are documented as nullable.
+
+const AGENT_WITHOUT_NUMBERS = { ...agent, numbers: null };
+const CALL_WITHOUT_PHONE_NUMBER = { ...call, phoneNumberId: null };
+
+async function callAndValidate(name, args, stub) {
+  const h = harness(makeStub(stub));
+  const r = await h.call(name, args);
+  assert.equal(r.isError, undefined, `${name}: unexpected error: ${r.isError ? r.content[0].text : ""}`);
+  const parsed = OUTPUT_SCHEMAS[name].safeParse(r.structuredContent);
+  assert.ok(parsed.success, `${name}: ${parsed.success ? "" : JSON.stringify(parsed.error.issues)}`);
+  return r;
+}
+
+test("get_agent accepts documented numbers: null", async () => {
+  const r = await callAndValidate("get_agent", { agent_id: "agt_1" }, { getAgent: async () => AGENT_WITHOUT_NUMBERS });
+  assert.equal(r.structuredContent.numbers, null);
+});
+
+test("list_agents accepts documented numbers: null", async () => {
+  const r = await callAndValidate("list_agents", {}, { listAgents: async () => ({ data: [AGENT_WITHOUT_NUMBERS], total: 1 }) });
+  assert.equal(r.structuredContent.data[0].numbers, null);
+});
+
+test("create_agent accepts documented numbers: null", async () => {
+  const r = await callAndValidate("create_agent", { name: "X" }, { createAgent: async () => AGENT_WITHOUT_NUMBERS });
+  assert.equal(r.structuredContent.numbers, null);
+});
+
+test("account_overview accepts agents with documented numbers: null", async () => {
+  const r = await callAndValidate("account_overview", {}, { listAgents: async () => ({ data: [AGENT_WITHOUT_NUMBERS], total: 1 }) });
+  assert.equal(r.structuredContent.agents[0].numbers, null);
+});
+
+test("list_calls accepts documented phoneNumberId: null", async () => {
+  const r = await callAndValidate("list_calls", {}, { listCalls: async () => ({ data: [CALL_WITHOUT_PHONE_NUMBER], hasMore: false, total: 1 }) });
+  assert.equal(r.structuredContent.data[0].phoneNumberId, null);
+});
+
+test("get_call accepts documented phoneNumberId: null", async () => {
+  const r = await callAndValidate("get_call", { call_id: "call_1" }, { getCall: async () => CALL_WITHOUT_PHONE_NUMBER });
+  assert.equal(r.structuredContent.phoneNumberId, null);
+});

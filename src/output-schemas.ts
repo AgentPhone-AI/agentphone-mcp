@@ -65,7 +65,7 @@ const agentFields = {
   voiceSpeed: z.number().optional().describe("Speech rate multiplier (1 = normal)."),
   language: z.string().optional().describe("BCP-47 locale for speech, e.g. en-US."),
   createdAt: z.string().optional().describe("When the agent was created (ISO 8601)."),
-  numbers: z.array(agentNumber).optional().describe("Phone numbers attached to this agent."),
+  numbers: z.array(agentNumber).nullable().optional().describe("Phone numbers attached to this agent, or null if none are attached."),
 };
 const agentObject = z.object(agentFields).passthrough().describe("An AgentPhone agent and its configuration.");
 
@@ -78,7 +78,7 @@ const callFields = {
   startedAt: z.string().optional().describe("When the call started (ISO 8601)."),
   endedAt: z.string().nullable().optional().describe("When the call ended (ISO 8601), or null if still active."),
   agentId: z.string().nullable().optional().describe("ID of the agent that handled the call, or null."),
-  phoneNumberId: z.string().optional().describe("ID of the phone number used for the call."),
+  phoneNumberId: z.string().nullable().optional().describe("ID of the phone number used for the call, or null."),
   retellCallId: z.string().nullable().optional().describe("Provider-side call ID, or null."),
 };
 const transcriptEntry = z
