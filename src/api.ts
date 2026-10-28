@@ -232,7 +232,7 @@ export class AgentPhoneAPI {
           id: string;
           phoneNumber: string;
           status: string;
-        }>;
+        }> | null;
       }>;
       total: number;
     }>("GET", `/v1/agents?limit=${limit}&offset=${offset}`);
@@ -279,7 +279,7 @@ export class AgentPhoneAPI {
       voiceSpeed: number;
       language: string;
       createdAt: string;
-      numbers: Array<{ id: string; phoneNumber: string; status: string }>;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
     }>("POST", "/v1/agents", params);
   }
 
@@ -327,7 +327,7 @@ export class AgentPhoneAPI {
       voiceSpeed: number;
       language: string;
       createdAt: string;
-      numbers?: Array<{ id: string; phoneNumber: string; status: string }>;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
     }>("PATCH", `/v1/agents/${encodeURIComponent(agentId)}`, params);
   }
 
@@ -365,7 +365,7 @@ export class AgentPhoneAPI {
         id: string;
         phoneNumber: string;
         status: string;
-      }>;
+      }> | null;
     }>("GET", `/v1/agents/${encodeURIComponent(agentId)}`);
   }
 
@@ -416,7 +416,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
@@ -472,9 +472,8 @@ export class AgentPhoneAPI {
     }>("POST", `/v1/agents/${encodeURIComponent(agentId)}/webhook/test`);
   }
 
-  async listAgentWebhookDeliveries(agentId: string, limit = 20, hours?: number) {
-    let path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
-    if (hours !== undefined) path += `&hours=${hours}`;
+  async listAgentWebhookDeliveries(agentId: string, limit = 20) {
+    const path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
     const rows = await this.request<WebhookDelivery[]>("GET", path);
     return { data: rows };
   }
@@ -501,7 +500,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
@@ -625,7 +624,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
