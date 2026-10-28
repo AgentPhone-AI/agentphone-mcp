@@ -524,8 +524,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "get_messages",
     "Get SMS messages for a specific phone number, identified by its number ID. Returns a list of " +
       "individual messages — each with its timestamp, sender, recipient, and text — rather than " +
-      "grouped conversation threads. Use before/after ISO timestamps to page through message history; " +
-      "results are newest first. Timestamp-only pagination can skip messages sharing a page boundary.",
+      "grouped conversation threads. Results are newest first. Use nextCursor from a response as " +
+      "cursor to fetch the next page; before/after are optional time filters. Cursor takes precedence over those filters.",
     {
       number_id: z.string().describe("The ID of the number whose messages you want, from list_numbers."),
       limit: z
@@ -536,19 +536,20 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .datetime({ offset: true })
         .optional()
-        .describe("Return messages before this ISO timestamp (use the oldest receivedAt to fetch older messages)"),
+        .describe("Return messages before this ISO timestamp"),
       after: z
         .string()
         .datetime({ offset: true })
         .optional()
         .describe("Return messages after this ISO timestamp"),
+      cursor: z.string().optional().describe("Opaque nextCursor returned by a previous page; takes precedence over before/after"),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ number_id, limit, before, after }) => {
+    async ({ number_id, limit, before, after, cursor }) => {
       try {
-        const result = await api.getMessages(number_id, limit, before, after);
+        const result = await api.getMessages(number_id, limit, before, after, cursor);
         if (result.data.length === 0) {
-          return ok(before || after
+          return ok(before || after || cursor
             ? "No messages found for this number in the requested time range."
             : "No messages found for this number.", result);
         }
@@ -557,9 +558,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
           .join("\n");
 
-        const nextPage = result.hasMore
-          ? `\n\nMore messages available. Use the same number_id${after ? " and after filter" : ""}, with before="${result.data[result.data.length - 1].receivedAt}" to fetch older messages. Messages sharing that timestamp may be skipped at the page boundary.`
-          : "";
+        const nextPage = result.hasMore && result.nextCursor != null
+          ? `\n\nMore messages available. Use the same number_id with cursor=${JSON.stringify(result.nextCursor)} to fetch the next page.`
+          : result.hasMore ? "\n\nMore messages are available, but the API did not return a next cursor." : "";
         return ok(`${result.data.length} message(s):\n\n${formatted}${nextPage}`, result);
       } catch (e) {
         return err(e);

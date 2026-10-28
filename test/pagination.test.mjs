@@ -11,6 +11,10 @@ const messages = [
   { id: "m1", from: "sender", to: "agent", body: "Oldest", receivedAt: "2026-10-13T09:00:00Z" },
 ];
 const agents = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
+const ties = ["t4", "t3", "t2", "t1"].map((id) => ({
+  id, from: "sender", to: "agent", body: id, receivedAt: "2026-10-13T12:00:00Z",
+}));
+const cursorFor = (offset) => `opaque/+ =${offset}`;
 
 async function connect(t) {
   const requests = [];
@@ -26,12 +30,16 @@ async function connect(t) {
     }
     const before = url.searchParams.get("before");
     const after = url.searchParams.get("after");
-    const filtered = messages.filter((message) =>
+    const source = url.pathname.includes("ties") ? ties : messages;
+    const cursor = url.searchParams.get("cursor");
+    const filtered = cursor !== null ? source : source.filter((message) =>
       (!before || Date.parse(message.receivedAt) < Date.parse(before)) &&
       (!after || Date.parse(message.receivedAt) > Date.parse(after))
     );
-    const data = filtered.slice(0, limit);
-    res.end(JSON.stringify({ data, hasMore: filtered.length > data.length }));
+    const offset = cursor === null ? 0 : Number(cursor.split("=").at(-1));
+    const data = filtered.slice(offset, offset + limit);
+    const hasMore = filtered.length > offset + data.length;
+    res.end(JSON.stringify({ data, hasMore, nextCursor: hasMore ? cursorFor(offset + data.length) : null }));
   });
   backend.listen(0, "127.0.0.1");
   await once(backend, "listening");
@@ -60,17 +68,21 @@ function text(result) {
   return result.content.map((item) => item.text).join("\n");
 }
 
-test("MCP schemas advertise timestamp cursors for messages and offsets for agents", async (t) => {
+test("MCP schemas advertise message cursors, time filters, and agent offsets", async (t) => {
   const { client } = await connect(t);
   const { tools } = await client.listTools();
   const messageSchema = tools.find((tool) => tool.name === "get_messages").inputSchema;
   assert.ok(messageSchema.properties.before);
   assert.ok(messageSchema.properties.after);
+  assert.ok(messageSchema.properties.cursor);
+  const outputSchema = tools.find((tool) => tool.name === "get_messages").outputSchema;
+  assert.ok(outputSchema.properties.nextCursor);
+  assert.ok(outputSchema.properties.nextCursor.anyOf.some((item) => item.type === "null"));
   assert.equal(messageSchema.properties.offset, undefined);
   assert.ok(tools.find((tool) => tool.name === "list_agents").inputSchema.properties.offset);
 });
 
-test("message pages advance using the exact timestamp returned by the backend", async (t) => {
+test("message pages advance using the opaque cursor returned by the backend", async (t) => {
   const { client, requests } = await connect(t);
   const firstResult = await client.callTool({
     name: "get_messages", arguments: { number_id: "number/with spaces", limit: 2 },
@@ -80,18 +92,19 @@ test("message pages advance using the exact timestamp returned by the backend", 
   assert.match(first, /Middle/);
   assert.doesNotMatch(first, /Oldest/);
   assert.match(first, /More messages/);
-  assert.match(first, /Messages sharing that timestamp may be skipped/);
   assert.deepEqual(firstResult.structuredContent.data, messages.slice(0, 2));
-  assert.ok(first.includes(`before="${messages[1].receivedAt}"`));
+  assert.equal(firstResult.structuredContent.nextCursor, cursorFor(2));
+  assert.ok(first.includes(`cursor=${JSON.stringify(cursorFor(2))}`));
 
   const second = text(await client.callTool({
     name: "get_messages",
-    arguments: { number_id: "number/with spaces", limit: 2, before: messages[1].receivedAt },
+    arguments: { number_id: "number/with spaces", limit: 2, cursor: firstResult.structuredContent.nextCursor },
   }));
   assert.match(second, /Oldest/);
   assert.doesNotMatch(second, /Newest|Middle|More messages/);
   assert.equal(requests[1].url.pathname, "/v1/numbers/number%2Fwith%20spaces/messages");
-  assert.equal(requests[1].url.searchParams.get("before"), messages[1].receivedAt);
+  assert.equal(requests[1].url.searchParams.get("cursor"), cursorFor(2));
+  assert.match(requests[1].url.search, /cursor=opaque%2F%2B\+%3D2/);
   assert.equal(requests[1].url.searchParams.has("offset"), false);
   assert.equal(requests[1].authorization, "Bearer test-key");
 });
@@ -108,23 +121,26 @@ test("message requests preserve before and after filters and fractional seconds"
   assert.equal(requests[0].url.searchParams.get("after"), messages[2].receivedAt);
 });
 
-test("continuing an after-filtered page preserves the lower timestamp bound", async (t) => {
-  const { client } = await connect(t);
-  const first = text(await client.callTool({
-    name: "get_messages",
-    arguments: { number_id: "n1", limit: 1, after: messages[2].receivedAt },
-  }));
-  assert.ok(first.includes(`before="${messages[0].receivedAt}"`));
-  assert.match(first, /same number_id and after filter/);
-
-  const second = text(await client.callTool({
-    name: "get_messages",
-    arguments: {
-      number_id: "n1", limit: 1, before: messages[0].receivedAt, after: messages[2].receivedAt,
-    },
-  }));
-  assert.match(second, /Middle/);
-  assert.doesNotMatch(second, /Newest|Oldest|More messages/);
+test("cursor pagination returns each message once across equal timestamp boundaries", async (t) => {
+  const { client, requests } = await connect(t);
+  let cursor;
+  const ids = [];
+  for (let page = 0; page < 2; page++) {
+    const response = await client.callTool({
+      name: "get_messages", arguments: { number_id: "ties", limit: 2, ...(cursor ? { cursor, before: "2000-01-01T00:00:00Z" } : {}) },
+    });
+    const rendered = text(response);
+    ids.push(...response.structuredContent.data.map((item) => item.id));
+    cursor = response.structuredContent.nextCursor;
+    if (page === 0) assert.ok(rendered.includes(`cursor=${JSON.stringify(cursor)}`));
+    else {
+      assert.equal(cursor, null);
+      assert.doesNotMatch(rendered, /More messages/);
+    }
+  }
+  assert.deepEqual(ids, ties.map((item) => item.id));
+  assert.equal(requests[1].url.searchParams.get("cursor"), cursorFor(2));
+  assert.equal(requests[1].url.searchParams.get("before"), "2000-01-01T00:00:00Z");
 });
 
 test("complete message pages do not advertise another page", async (t) => {

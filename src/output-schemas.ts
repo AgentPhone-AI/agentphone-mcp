@@ -245,6 +245,7 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       data: z.array(messageEntry).describe("Messages for the number, newest first."),
       ...listMeta,
+      nextCursor: z.string().nullable().optional().describe("Opaque cursor for the next page, or null when unavailable."),
     })
     .passthrough()
     .describe("Messages for a specific phone number."),
