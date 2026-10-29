@@ -162,9 +162,10 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `send_message` | Send SMS or iMessage. Supports media, threaded replies (`reply_to_message_id`), iMessage send effects (`send_style`), and group chats |
-| `get_messages` | Get messages for a specific number |
+| `get_messages` | Get messages for a specific number. Page older history with `cursor` (from `nextCursor`); `before`/`after` are optional time filters. |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
-| `get_conversation` | Get a conversation with full message history |
+| `get_conversation` | Get a conversation with a bounded tail of recent messages |
+| `get_conversation_messages` | Page through a conversation's full message history with `cursor` |
 | `update_conversation` | Set metadata on a conversation |
 
 ### Contacts
@@ -178,7 +179,7 @@ The optional anonymous mode instead uses the configured server API key.
 
 | Tool | Description |
 |------|-------------|
-| `list_calls` | List calls. Filter by `agent_id`, `number_id`, status, direction, or keyword. |
+| `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
 | `get_call` | Get call details and transcript |
 | `make_call` | Place an outbound call (webhook-driven) |
 | `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed |
