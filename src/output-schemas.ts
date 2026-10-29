@@ -278,6 +278,22 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .passthrough()
     .describe("The sent message, or the applied reaction when reacting."),
 
+  check_capabilities: z
+    .object({
+      phoneNumber: z.string().describe("The number that was checked."),
+      capabilities: z
+        .object({
+          imessage: z.boolean().nullable().optional().describe("Can receive iMessage (null if unknown)."),
+          sms: z.boolean().nullable().optional().describe("Can receive SMS (null if unknown)."),
+          rcs: z.boolean().nullable().optional().describe("Can receive RCS (null if unknown)."),
+        })
+        .passthrough()
+        .describe("Per-channel reachability flags."),
+      checkedAt: z.string().describe("When the capabilities were checked (ISO 8601)."),
+    })
+    .passthrough()
+    .describe("The messaging channels a phone number can receive."),
+
   get_messages: z
     .object({
       data: z.array(messageEntry).describe("Messages for the number, newest first."),

@@ -162,6 +162,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   attach_number: { title: "Attach Number to Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   detach_number: { title: "Detach Number from Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   list_voices: { title: "List Voices", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  check_capabilities: { title: "Check Messaging Capabilities", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_conversations: { title: "List Conversations", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_conversation: { title: "Get Conversation", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_conversation_messages: { title: "Get Conversation Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
