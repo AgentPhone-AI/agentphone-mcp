@@ -571,6 +571,40 @@ test("HTTP and stdio enforce webhook defaults and reaction validation through th
   }
 });
 
+test("HTTP rejects an oversized request body before parsing (tasks#193)", async (t) => {
+  const backend = await startFakeBackend(t);
+  const { child, origin } = await startHttpServer(t, { AGENTPHONE_BASE_URL: backend.url });
+  await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+  // 2 MB of JSON — over the 1 MB cap. The limit must trip before any backend call.
+  const huge = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body: "x".repeat(2_000_000) } } });
+  const res = await fetch(`${origin}/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: "Bearer caller-key" },
+    body: huge,
+  });
+  assert.equal(res.status, 413, "oversized body must be rejected with 413");
+  assert.deepEqual(backend.seen, [], "an oversized body must never reach the backend");
+});
+
+test("stdio caps total tool-input elements (tasks#193)", async (t) => {
+  const backend = await startFakeBackend(t);
+  const transport = new StdioClientTransport({
+    command: process.execPath, args: ["dist/index.js", "--stdio"], cwd: process.cwd(),
+    env: { AGENTPHONE_API_KEY: "stdio-key", AGENTPHONE_BASE_URL: backend.url, MCP_USE_ANONYMIZED_TELEMETRY: "false" }, stderr: "pipe",
+  });
+  transport.stderr?.on("data", () => {});
+  const client = new Client({ name: "test", version: "0.0.0" });
+  t.after(() => client.close());
+  await client.connect(transport);
+  // 10,001 recipients exceeds maxToolInputElements (10,000); the SDK rejects the
+  // call before our handler or any backend request.
+  const r = await client.callTool({ name: "send_message", arguments: { agent_id: "a", recipients: Array(10_001).fill("+14155550101"), body: "hi" } });
+  assert.equal(r.isError, true, "a call exceeding the element cap must error");
+  // Must be the SDK element cap (before schema/handler), not our 128-recipient check.
+  assert.match(r.content[0].text, /maximum of 10000 elements/);
+  assert.deepEqual(backend.seen, [], "an over-limit call must never reach the backend");
+});
+
 test("tools/list is identical across HTTP and stdio transports (tasks#202)", async (t) => {
   // One authoritative tool definition must drive both transports: same names,
   // titles, behavior hints, and required inputs. (Previously stdio copied only

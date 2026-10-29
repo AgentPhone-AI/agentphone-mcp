@@ -33,6 +33,14 @@ const { version: VERSION } = createRequire(import.meta.url)("../package.json") a
 };
 const BASE_URL = (process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.ai").replace(/\/$/, "");
 
+// Input-size limits (tasks#193). maxToolInputElements bounds how many array/object
+// elements one tool call may carry (enforced by the SDK before validation);
+// MAX_REQUEST_BODY_BYTES caps an HTTP request body before it is parsed. Both sit
+// far above any legitimate call (e.g. 128 recipients) but well below a payload
+// that could exhaust memory.
+const MAX_TOOL_INPUT_ELEMENTS = 10_000;
+const MAX_REQUEST_BODY_BYTES = 1_000_000;
+
 // Server handshake metadata surfaced in the MCP initialize/discovery response
 // (serverInfo title/websiteUrl/icons, plus server-wide instructions). mcp-use
 // (HTTP) and the SDK McpServer (stdio) both read these fields.
@@ -207,7 +215,11 @@ async function startStdio(): Promise<void> {
   const api = new AgentPhoneAPI(BASE_URL, apiKey);
   const server = new McpServer(
     { name: NAME, title: TITLE, version: VERSION, description: DESCRIPTION, websiteUrl: WEBSITE_URL, icons: ICONS },
-    { instructions: INSTRUCTIONS }
+    // Cap the total number of elements across a tool call's input arrays/objects.
+    // The SDK enforces this BEFORE schema validation, which bounds the memory a
+    // single malformed request can force the validator to allocate (the input
+    // side of GHSA-mrhx-c7xc-m3w5). No legitimate call comes near the limit.
+    { instructions: INSTRUCTIONS, maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
   );
   installConciseValidation(server);
   // Adapter: register each tool via registerTool so it can carry a title and an
@@ -381,6 +393,19 @@ async function startHttp(): Promise<void> {
   installConciseValidation(
     (server as unknown as { nativeServer?: unknown; server?: unknown }).nativeServer ??
       (server as unknown as { server?: unknown }).server
+  );
+
+  // Reject an oversized request body before it is parsed, so a malformed payload
+  // can't force the JSON parser / validator to allocate unbounded memory on the
+  // HTTP transport (tasks#193). mcp-use's server exposes the underlying hono app.
+  const { bodyLimit } = await import("hono/body-limit");
+  server.app.use(
+    "/mcp",
+    bodyLimit({
+      maxSize: MAX_REQUEST_BODY_BYTES,
+      onError: (c: any) =>
+        c.json({ error: `Request body exceeds the ${MAX_REQUEST_BODY_BYTES}-byte limit.` }, 413),
+    })
   );
 
   // Public, unauthenticated discovery metadata. Server cards are currently a

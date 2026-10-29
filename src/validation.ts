@@ -125,23 +125,36 @@ export function installConciseValidation(nativeServer: unknown): boolean {
     return false;
   }
   proto.__agentphoneConciseValidation = true;
+  // Keep the SDK's own validateToolInput so its element-count guard
+  // (maxToolInputElements) still runs BEFORE schema parsing — the input side of
+  // the memory-exhaustion advisory. We only reword the schema-validation message.
+  const original = proto.validateToolInput;
   proto.validateToolInput = async function (
     tool: any,
     args: unknown,
     toolName: string,
   ) {
-    if (!tool?.inputSchema) return undefined;
-    const schemaToParse =
-      normalizeObjectSchema(tool.inputSchema) ?? tool.inputSchema;
-    const validationArgs = args ?? {};
-    const result = (await safeParseAsync(schemaToParse, validationArgs)) as {
-      success: boolean;
-      data?: unknown;
-      error?: {
-        issues?: Array<{ path?: Array<string | number>; message?: string }>;
+    // Let the SDK run first: it enforces the element cap and parses the schema.
+    // A success returns the parsed data unchanged; only a *schema* failure is
+    // rephrased below. The element-cap error is left as-is (already concise).
+    try {
+      return await (original as any).call(this, tool, args, toolName);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The element-cap error mentions the maximum element count; pass it through.
+      if (/maximum of \d+ elements/.test(message)) throw err;
+      if (!tool?.inputSchema) throw err;
+      // Re-derive a concise, per-field message for the schema failure.
+      const schemaToParse =
+        normalizeObjectSchema(tool.inputSchema) ?? tool.inputSchema;
+      const validationArgs = args ?? {};
+      const result = (await safeParseAsync(schemaToParse, validationArgs)) as {
+        success: boolean;
+        error?: {
+          issues?: Array<{ path?: Array<string | number>; message?: string }>;
+        };
       };
-    };
-    if (!result.success) {
+      if (result.success) throw err; // not a schema problem — keep the original
       const issues = result.error?.issues ?? [];
       const summary =
         issues.map((i) => describeValidationIssue(i, validationArgs)).join("; ") ||
@@ -153,7 +166,6 @@ export function installConciseValidation(nativeServer: unknown): boolean {
       // concise message as an isError result on every transport.
       throw new Error(`Invalid arguments for ${toolName}: ${summary}`);
     }
-    return result.data;
   };
   return true;
 }
