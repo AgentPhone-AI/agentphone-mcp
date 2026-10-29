@@ -72,12 +72,13 @@ export class AgentPhoneAPI {
         const text = await res.text();
         let detail = text;
         try {
-          const json = JSON.parse(text);
-          detail = json.detail ?? json.message ?? text;
+          detail = formatApiErrorDetail(JSON.parse(text)) ?? text;
         } catch {
-          // use raw text
+          // non-JSON body: keep the raw text
         }
-        throw new ApiError(res.status, method, path, detail);
+        detail = redactSecrets(detail) || `HTTP ${res.status}`;
+        const retryAfter = res.headers.get("retry-after");
+        throw new ApiError(res.status, method, path, detail, retryAfter);
       }
 
       // Treat any empty body as {} — not just 204. A 200 with no content (which
@@ -869,9 +870,70 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly method: string,
     public readonly path: string,
-    public readonly detail: string
+    public readonly detail: string,
+    // The server's Retry-After header (seconds or HTTP date), when present —
+    // surfaced on 429 so callers back off for the advised time (see err()).
+    public readonly retryAfter: string | null = null
   ) {
     super(`AgentPhone API ${method} ${path} failed (${status}): ${detail}`);
     this.name = "ApiError";
   }
+}
+
+// Strip anything that looks like a credential from error text before it reaches
+// a tool result (which is logged and enters model context).
+function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(sk|rk)_[A-Za-z0-9_-]{6,}/g, "$1_***")
+    // RFC 6750 bearer tokens allow A-Z a-z 0-9 - . _ ~ + / =, so match the full
+    // set (not just word chars) or a token with these could be partly exposed.
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer ***");
+}
+
+// Turn the backend's error envelope into one actionable line. Handles the
+// structured { detail, error: { code, details } } shape, FastAPI validation
+// arrays ([{ loc, msg }]), and plain { detail } / { message } strings — rather
+// than stringifying an object into "[object Object]" or dropping field details.
+function formatApiErrorDetail(json: unknown): string | undefined {
+  if (json == null || typeof json !== "object") return undefined;
+  const j = json as Record<string, any>;
+
+  const fieldLine = (loc: unknown, msg: unknown): string => {
+    const field = Array.isArray(loc)
+      ? loc.filter((p) => p !== "body" && p !== "query" && p !== "path").join(".")
+      : loc != null
+        ? String(loc)
+        : "";
+    return field ? `${field}: ${msg}` : String(msg);
+  };
+
+  // Structured envelope: { detail, error: { code, details } }
+  const structured = j.error;
+  if (structured && typeof structured === "object") {
+    const parts: string[] = [];
+    const base = typeof j.detail === "string" ? j.detail : undefined;
+    if (base) parts.push(structured.code ? `${base} (${structured.code})` : base);
+    else if (structured.code) parts.push(String(structured.code));
+    const details = structured.details;
+    if (Array.isArray(details)) {
+      for (const d of details) {
+        parts.push(d && typeof d === "object" ? fieldLine(d.field ?? d.loc, d.message ?? d.msg) : String(d));
+      }
+    } else if (typeof details === "string") {
+      parts.push(details);
+    }
+    if (parts.length) return parts.join("; ");
+  }
+
+  // FastAPI validation array: detail = [{ loc, msg, type }]
+  if (Array.isArray(j.detail)) {
+    const lines = j.detail.map((d) =>
+      d && typeof d === "object" ? fieldLine(d.loc, d.msg) : String(d)
+    );
+    if (lines.length) return lines.join("; ");
+  }
+
+  if (typeof j.detail === "string") return j.detail;
+  if (typeof j.message === "string") return j.message;
+  return undefined;
 }

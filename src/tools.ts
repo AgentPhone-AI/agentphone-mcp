@@ -93,7 +93,9 @@ function err(error: unknown): ToolResult {
           hint = " Use get_webhook to check whether a webhook is configured.";
         break;
       case 429:
-        hint = " Rate limited — wait a moment and try again.";
+        hint = error.retryAfter
+          ? ` Rate limited — wait ${error.retryAfter} (per Retry-After) before trying again.`
+          : " Rate limited — wait a moment and try again.";
         break;
     }
     return { content: [{ type: "text", text: base + hint }], isError: true };
@@ -317,11 +319,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "country, and the agent it is assigned to (if any).",
     {
       limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(20)
         .describe("How many numbers to return in one page."),
       offset: z
-        .number()
+        .number().int().min(0)
         .default(0)
         .describe("How many numbers to skip before this page, for paging through a long list."),
     },
@@ -434,10 +436,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("The message text to send (may be empty when sending media only)"),
       media_url: z
         .string()
+        .url()
         .optional()
         .describe("Link (URL) to a single image or media file to attach to the message."),
       media_urls: z
-        .array(z.string())
+        .array(z.string().url())
         .optional()
         .describe("Multiple media links (URLs) to attach, delivered as an image carousel on iMessage."),
       number_id: z
@@ -456,9 +459,12 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("iMessage only. ID of an earlier message to reply to inline (threaded reply)"),
       send_style: z
-        .string()
+        .enum([
+          "celebration", "fireworks", "lasers", "love", "confetti", "balloons",
+          "spotlight", "echo", "invisible", "gentle", "loud", "slam",
+        ])
         .optional()
-        .describe("An expressive screen or bubble effect played when the message arrives (iMessage only; ignored on SMS). One of: celebration, fireworks, lasers, love, confetti, balloons, spotlight, echo, invisible, gentle, loud, slam."),
+        .describe("An expressive screen or bubble effect played when the message arrives (iMessage only; ignored on SMS)."),
       react_to_message_id: z
         .string()
         .optional()
@@ -564,7 +570,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     {
       number_id: z.string().describe("The ID of the number whose messages you want, from list_numbers."),
       limit: z
-        .number()
+        .number().int().min(1).max(200)
         .default(50)
         .describe("How many of the most recent messages to return."),
     },
@@ -606,11 +612,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Show only calls on this phone number (ID from list_numbers)."),
       limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(20)
         .describe("How many calls to return in one page."),
       offset: z
-        .number()
+        .number().int().min(0)
         .default(0)
         .describe("How many calls to skip before this page, for paging."),
       status: z
@@ -618,9 +624,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Keep only calls in this state, e.g. ringing, in-progress, completed, failed, busy, or no-answer."),
       direction: z
-        .string()
+        .enum(["inbound", "outbound"])
         .optional()
-        .describe("Keep only inbound calls or only outbound calls — one of \"inbound\" or \"outbound\"."),
+        .describe("Keep only inbound calls, or only outbound calls."),
       search: z
         .string()
         .optional()
@@ -676,7 +682,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
             "Useful for checking back on a call you initiated earlier."
         ),
       timeout: z
-        .number()
+        .number().int().min(10).max(300)
         .default(120)
         .describe("How long to keep long-polling, in seconds, when wait=true, before returning the call in whatever state it has reached."),
     },
@@ -809,7 +815,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .default(true)
         .describe("When true (default), blocks until the call ends and returns the full transcript."),
       max_wait_seconds: z
-        .number()
+        .number().int().min(10).max(600)
         .default(300)
         .describe("How long to wait for the call to finish before returning, in seconds, when wait=true."),
       from_number_id: z
@@ -901,7 +907,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "voice configuration, and attached phone numbers.",
     {
       limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(20)
         .describe("How many agents to return in one page."),
     },
@@ -963,11 +969,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Voicemail greeting text. When set, unanswered calls hear this message and can leave a voicemail."),
       voice_speed: z
-        .number()
+        .number().min(0.5).max(2)
         .optional()
         .describe("How fast the agent speaks, as a multiplier of normal pace (1 is normal, below 1 is slower, above 1 is faster). If omitted, the agent uses its default speed."),
       interruption_sensitivity: z
-        .number()
+        .number().min(0).max(1)
         .optional()
         .describe("How readily the agent lets a caller interrupt it — lower values make it harder to cut off, higher values stop it at the first sound."),
       enable_backchannel: z
@@ -991,7 +997,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Audio denoising. The aggressive mode helps callers in cars/cafes (small surcharge)."),
       max_silence_ms: z
-        .number()
+        .number().int().min(10000).max(3600000)
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to use the server default (about 10 minutes)."),
       language: z
@@ -1080,11 +1086,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Voicemail greeting text, or empty string to disable voicemail."),
       voice_speed: z
-        .number()
+        .number().min(0.5).max(2)
         .optional()
         .describe("How fast the agent speaks, as a multiplier of normal pace (1 is normal, below 1 is slower, above 1 is faster). If omitted, the current speed is unchanged."),
       interruption_sensitivity: z
-        .number()
+        .number().min(0).max(1)
         .optional()
         .describe("How readily the agent lets a caller interrupt it — lower values make it harder to cut off, higher values stop it at the first sound."),
       enable_backchannel: z
@@ -1108,7 +1114,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Audio denoising. The aggressive mode helps callers in cars/cafes (small surcharge)."),
       max_silence_ms: z
-        .number()
+        .number().int().min(10000).max(3600000)
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to keep the agent's current timeout."),
       language: z
@@ -1282,11 +1288,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Show only conversations handled by this agent (ID from list_agents)."),
       limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(20)
         .describe("How many conversations to return in one page."),
       offset: z
-        .number()
+        .number().int().min(0)
         .default(0)
         .describe("How many conversations to skip before this page, for paging."),
     },
@@ -1328,7 +1334,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     {
       conversation_id: z.string().describe("The ID of the conversation to fetch, from list_conversations."),
       message_limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(50)
         .describe("How many of the most recent messages to include."),
     },
@@ -1401,8 +1407,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "and ID. Optionally filter with a search term that matches name or phone number.",
     {
       search: z.string().optional().describe("Match contacts by name or phone number."),
-      limit: z.number().default(50).describe("How many contacts to return in one page."),
-      offset: z.number().default(0).describe("How many contacts to skip before this page, for paging."),
+      limit: z.number().int().min(1).max(200).default(50).describe("How many contacts to return in one page."),
+      offset: z.number().int().min(0).default(0).describe("How many contacts to skip before this page, for paging."),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ search, limit, offset }) => {
@@ -1440,7 +1446,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("The contact's phone number in full international form with country code (e.g. +14155551234). Required for 'create'."),
       name: z.string().optional().describe("Contact name. Required for 'create'."),
-      email: z.string().optional().describe("An email address to save with the contact."),
+      email: z.string().email().optional().describe("An email address to save with the contact."),
       notes: z.string().optional().describe("Freeform notes to store with the contact, for your reference."),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
@@ -1493,11 +1499,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .default("summary")
         .describe("What to return: an overall summary of number usage and totals, a day-by-day series, or a month-by-month series."),
       days: z
-        .number()
+        .number().int().min(1).max(365)
         .default(30)
         .describe("How far back the daily series reaches, in days. Ignored unless breakdown='daily'."),
       months: z
-        .number()
+        .number().int().min(1).max(24)
         .default(12)
         .describe("How far back the monthly series reaches, in months. Ignored unless breakdown='monthly'."),
     },
@@ -1621,7 +1627,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Agent ID to set webhook for that agent only. Omit for project-level."),
       context_limit: z
-        .number()
+        .number().int().min(0).max(50)
         .optional()
         .describe("How many recent messages to include with each webhook as conversation context. If omitted, the server's default context size is used."),
       timeout: z
@@ -1727,11 +1733,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("Agent ID to see deliveries for that agent's webhook. Omit for project-level."),
       limit: z
-        .number()
+        .number().int().min(1).max(100)
         .default(20)
         .describe("How many of the most recent deliveries to return. If omitted, the 20 most recent are returned."),
       hours: z
-        .number()
+        .number().int().min(1)
         .optional()
         .describe("Project-level history only: include deliveries from the last N hours. Cannot be combined with agent_id. If omitted, deliveries are returned regardless of age."),
     },
