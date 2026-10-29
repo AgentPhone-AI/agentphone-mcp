@@ -20,3 +20,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npm run check:release
+      - run: npm run smoke:pack
