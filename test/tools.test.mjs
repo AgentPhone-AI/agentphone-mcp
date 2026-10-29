@@ -394,3 +394,33 @@ test("list_webhook_deliveries preserves the supported project time filter", asyn
   assert.deepEqual(seen, ["GET https://example.test/v1/webhooks/deliveries?limit=7&hours=24"]);
   assert.deepEqual(result.structuredContent, { data: [], total: 0 });
 });
+
+const AGENT = { id: "agt_1", name: "Support", voiceMode: "hosted", voice: "Skylar", modelTier: "balanced" };
+
+test("create_agent language accepts only documented codes", async () => {
+  const h = harness({ createAgent: async (params) => ({ ...AGENT, ...params }) });
+  const language = h.schema("create_agent").language;
+  assert.equal(language.safeParse("yue-CN").success, true);
+  assert.equal(language.safeParse("xx-XX").success, false);
+
+  await assert.rejects(() => h.call("create_agent", { name: "Support", language: "xx-XX" }));
+  assert.deepEqual(h.calls, []);
+
+  const result = await h.call("create_agent", { name: "Support", language: "yue-CN" });
+  assert.notEqual(result.isError, true);
+  assert.equal(h.calls[0].args[0].language, "yue-CN");
+});
+
+test("update_agent language accepts only documented codes", async () => {
+  const h = harness({ updateAgent: async (_id, params) => ({ ...AGENT, ...params }) });
+  const language = h.schema("update_agent").language;
+  assert.equal(language.safeParse("yue-CN").success, true);
+  assert.equal(language.safeParse("xx-XX").success, false);
+
+  await assert.rejects(() => h.call("update_agent", { agent_id: "agt_1", language: "xx-XX" }));
+  assert.deepEqual(h.calls, []);
+
+  const result = await h.call("update_agent", { agent_id: "agt_1", language: "yue-CN" });
+  assert.notEqual(result.isError, true);
+  assert.equal(h.calls[0].args[1].language, "yue-CN");
+});
