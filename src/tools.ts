@@ -825,13 +825,15 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         return err(e); // 404 → err() points at list_numbers
       }
 
-      // A2P/10DLC applies to US SMS only — relevant for an explicit SMS check or a
-      // general check (the send path can auto-select SMS). iMessage, WhatsApp and
-      // voice don't need it. The contact-capabilities endpoint reports iMessage/
-      // SMS/RCS, so a recipient reachability check only makes sense for those
-      // messaging channels (not WhatsApp or voice).
-      const smsRelevant = channel === "sms" || channel === undefined;
+      // SMS readiness (outboundSms state + account A2P/10DLC) is relevant for every
+      // messaging path: an explicit SMS check, a general check, AND an iMessage
+      // check (iMessage falls back to SMS when the recipient can't receive it).
+      // WhatsApp and voice don't use SMS. A registration gap is only a HARD blocker
+      // for an explicit channel=sms intent (below); otherwise it's a warning.
+      // The contact-capabilities endpoint reports iMessage/SMS/RCS, so a recipient
+      // reachability check only makes sense for those messaging channels.
       const messagingChannel = channel === "sms" || channel === "imessage" || channel === undefined;
+      const smsRelevant = messagingChannel;
       const wantRecipient = to_number !== undefined && messagingChannel;
 
       // Best-effort lookups: a failure degrades to a warning, not a failed check.
@@ -890,14 +892,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
       }
 
-      // Recipient reachability (messaging channels only).
+      // Recipient reachability (messaging channels only). send_message delivers over
+      // SMS/iMessage, so base reachability on those two — not RCS, which the tool
+      // can't send.
       if (recipient) {
         const c = recipient.capabilities ?? {};
         if (channel === "imessage" && c.imessage === false) {
           warnings.push(`${to_number} cannot receive iMessage; it would fall back to SMS.`);
         }
-        if (c.sms === false && c.imessage !== true && c.rcs !== true) {
-          warnings.push(`${to_number} does not appear reachable by SMS, iMessage, or RCS.`);
+        if (c.sms === false && c.imessage !== true) {
+          warnings.push(`${to_number} does not appear reachable by SMS or iMessage.`);
         }
       } else if (recipientFailed) {
         warnings.push(`Could not check reachability for ${to_number}.`);

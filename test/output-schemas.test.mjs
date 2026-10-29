@@ -591,6 +591,8 @@ test("check_readiness reports ready and the documented blocker states (tasks#199
     getContactCapabilities: async () => { capCalled = true; return { phoneNumber: "x", capabilities: {}, checkedAt: "t" }; },
   }));
   r = await h.call("check_readiness", { number_id: "num_1", channel: "voice", to_number: "+14155550199" });
+  assert.equal(r.isError, undefined, "voice readiness should still succeed");
+  assert.equal(typeof r.structuredContent.ready, "boolean");
   assert.equal(capCalled, false, "voice readiness must not query messaging capabilities");
 
   // A general (no channel) check does NOT hard-block on SMS registration.
