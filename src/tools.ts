@@ -695,6 +695,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("How many calls to skip before this page, for paging."),
       status: z
         .string()
+        .min(1)
         .optional()
         .describe("Keep only calls in this state, e.g. ringing, in-progress, completed, failed, busy, or no-answer."),
       direction: z
@@ -703,6 +704,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("Keep only inbound calls, or only outbound calls."),
       search: z
         .string()
+        .min(1)
         .optional()
         .describe("Match calls by phone number or keyword."),
     },

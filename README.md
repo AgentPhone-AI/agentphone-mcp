@@ -141,7 +141,7 @@ The optional anonymous mode instead uses the configured server API key.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
-## All Tools (28)
+## All Tools (29)
 
 ### Account
 

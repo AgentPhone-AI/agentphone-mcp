@@ -286,10 +286,24 @@ test("list_calls composes supported filters or rejects unsupported combinations 
   assert.deepEqual(r.structuredContent.appliedFilters, { status: "completed", direction: "inbound", search: "+1310" });
   assert.match(r.content[0].text, /status=completed/);
 
-  // Scoped to a number: works, no filters applied.
-  r = await h.call("list_calls", { number_id: "num_1" });
+  // Scoped to a number: dispatches to the number endpoint with pagination,
+  // applies no filters.
+  const numCalls = [];
+  h = harness(makeStub({ listCallsForNumber: async (id, limit, offset) => { numCalls.push({ id, limit, offset }); return { data: [call], hasMore: false, total: 1 }; } }));
+  r = await h.call("list_calls", { number_id: "num_1", limit: 5, offset: 10 });
+  assert.deepEqual(numCalls, [{ id: "num_1", limit: 5, offset: 10 }]);
   assert.equal(r.structuredContent.scope, "number_id=num_1");
   assert.deepEqual(r.structuredContent.appliedFilters, {});
+
+  // Scoped to an agent: dispatches to the agent endpoint with pagination.
+  const agtCalls = [];
+  h = harness(makeStub({ listAgentCalls: async (id, limit, offset) => { agtCalls.push({ id, limit, offset }); return { data: [call], hasMore: false, total: 1 }; } }));
+  r = await h.call("list_calls", { agent_id: "agt_1", limit: 7, offset: 0 });
+  assert.deepEqual(agtCalls, [{ id: "agt_1", limit: 7, offset: 0 }]);
+  assert.equal(r.structuredContent.scope, "agent_id=agt_1");
+
+  // Restore the filter-recording harness for the remaining rejection cases.
+  h = harness(makeStub({ listCalls: async () => ({ data: [call], hasMore: false, total: 1 }) }));
 
   // number_id + a filter -> explicit error, not silent drop.
   r = await h.call("list_calls", { number_id: "num_1", status: "completed" });
