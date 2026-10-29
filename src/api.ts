@@ -5,14 +5,6 @@
  * Used by the MCP server to proxy tool calls to the backend.
  */
 
-// Extra time the client keeps the socket open past the server-side long-poll
-// wait, so a call that runs to its full wait is not aborted just before the
-// response lands.
-const LONG_POLL_GRACE_MS = 15_000;
-// Server-side maximums, used when the caller does not pass an explicit wait.
-const GET_CALL_MAX_WAIT_SECONDS = 300;
-const CONVERSATION_CALL_MAX_WAIT_SECONDS = 600;
-
 type WebhookDelivery = {
   id: string;
   eventType: string | null;
@@ -525,23 +517,10 @@ export class AgentPhoneAPI {
     }>("GET", path);
   }
 
-  async getCall(callId: string, opts?: { wait?: boolean; timeout?: number }) {
-    let path = `/v1/calls/${encodeURIComponent(callId)}`;
-    const params: string[] = [];
-    if (opts?.wait) params.push("wait=true");
-    if (opts?.timeout) params.push(`timeout=${opts.timeout}`);
-    if (params.length) path += `?${params.join("&")}`;
-
-    // Size the client abort timer from the requested wait, but clamp it to the
-    // server's own maximum. The input schema no longer bounds `timeout`, so this
-    // keeps an out-of-range value (e.g. 999999) from holding the socket open far
-    // longer than the server would ever wait; the API still validates the value.
-    const fetchTimeout = opts?.wait
-      ? Math.min(opts.timeout || GET_CALL_MAX_WAIT_SECONDS, GET_CALL_MAX_WAIT_SECONDS) *
-          1000 +
-        LONG_POLL_GRACE_MS
-      : undefined;
-
+  // Returns the call's current state and transcript immediately. The backend
+  // does not long-poll for completion, so there is no wait/timeout parameter;
+  // poll again with get_call to observe a call that is still in progress.
+  async getCall(callId: string) {
     return this.request<{
       id: string;
       fromNumber: string;
@@ -557,7 +536,7 @@ export class AgentPhoneAPI {
         response: string | null;
         createdAt: string;
       }>;
-    }>("GET", path, undefined, fetchTimeout);
+    }>("GET", `/v1/calls/${encodeURIComponent(callId)}`);
   }
 
   async makeCall(
@@ -583,35 +562,21 @@ export class AgentPhoneAPI {
     }>("POST", "/v1/calls", body);
   }
 
+  // Initiates the call and returns immediately with its ID and initial state.
+  // The backend has no completion-wait, so get_call is used to retrieve the
+  // transcript once the call has progressed.
   async makeConversationCall(
     agentId: string,
     toNumber: string,
     systemPrompt: string,
     initialGreeting?: string,
-    waitForCompletion?: boolean,
-    maxWaitSeconds?: number,
     fromNumberId?: string,
     voice?: string
   ) {
     const body: Record<string, unknown> = { agentId, toNumber, systemPrompt };
     if (initialGreeting !== undefined) body.initialGreeting = initialGreeting;
-    if (waitForCompletion !== undefined) body.waitForCompletion = waitForCompletion;
-    if (maxWaitSeconds !== undefined) body.maxWaitSeconds = maxWaitSeconds;
     if (fromNumberId !== undefined) body.fromNumberId = fromNumberId;
     if (voice !== undefined) body.voice = voice;
-
-    // Clamp the client abort timer to the server's maximum. The input schema no
-    // longer bounds max_wait_seconds, so this keeps an out-of-range value from
-    // holding the socket open far longer than the server would ever wait (the
-    // API still validates the raw value in the body).
-    const fetchTimeout = waitForCompletion
-      ? Math.min(
-          maxWaitSeconds ?? CONVERSATION_CALL_MAX_WAIT_SECONDS,
-          CONVERSATION_CALL_MAX_WAIT_SECONDS
-        ) *
-          1000 +
-        LONG_POLL_GRACE_MS
-      : undefined;
 
     return this.request<{
       id: string;
@@ -628,7 +593,7 @@ export class AgentPhoneAPI {
         response: string | null;
         createdAt: string;
       }>;
-    }>("POST", "/v1/calls", body, fetchTimeout);
+    }>("POST", "/v1/calls", body);
   }
 
   async listCallsForNumber(numberId: string, limit = 20, offset = 0) {
