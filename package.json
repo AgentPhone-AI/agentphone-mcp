@@ -17,7 +17,9 @@
     "start": "node dist/index.js",
     "test": "npm run build && node --test test/*.test.mjs",
     "check:release": "node scripts/check-release-alignment.mjs",
+    "check:contract": "node scripts/check-openapi-contract.mjs",
     "smoke:pack": "node scripts/smoke-pack.mjs",
+    "canary": "node scripts/canary.mjs",
     "prepublishOnly": "npm run build && npm run check:release && npm run smoke:pack"
   },
   "keywords": [
