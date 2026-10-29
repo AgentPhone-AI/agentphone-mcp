@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 29 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 30 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -194,6 +194,52 @@ function pageFooter(
   return result.nextCursor
     ? `\n\nMore available. ${continueHint} cursor=${JSON.stringify(result.nextCursor)} to fetch the next page.`
     : "\n\nMore results exist, but the API did not return a next cursor. Narrow the range with before/after; note that time filters can omit messages that share a page boundary.";
+}
+
+// Optional per-call controls shared by make_call and make_conversation_call,
+// forwarded to POST /v1/calls. Each is omitted from the request when unset so the
+// backend default stands.
+function callControlInputs() {
+  return {
+    disable_recording: z
+      .boolean()
+      .optional()
+      .describe("Set true to disable call recording for this call. If omitted, the account/agent default applies."),
+    variables: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe("Dynamic string variables made available to the call (e.g. {\"customerName\":\"Sam\"})."),
+    model_tier: z
+      .enum(["turbo", "balanced", "max", "realtime"])
+      .optional()
+      .describe("Override the model quality/speed tier for just this call. If omitted, the agent's tier is used."),
+    call_screening_identity: z
+      .string()
+      .optional()
+      .describe("Identity to present if the callee's carrier screens the call (e.g. your business name)."),
+    call_screening_purpose: z
+      .string()
+      .optional()
+      .describe("Stated purpose to present to call screening (e.g. 'appointment reminder')."),
+  };
+}
+
+// Map the snake_case tool inputs to the API client's CallControls shape, leaving
+// unset fields undefined so they are not forwarded.
+function buildCallControls(args: {
+  disable_recording?: boolean;
+  variables?: Record<string, string>;
+  model_tier?: string;
+  call_screening_identity?: string;
+  call_screening_purpose?: string;
+}) {
+  return {
+    disableRecording: args.disable_recording,
+    variables: args.variables,
+    modelTier: args.model_tier,
+    callScreeningIdentity: args.call_screening_identity,
+    callScreeningPurpose: args.call_screening_purpose,
+  };
 }
 
 export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
@@ -835,6 +881,30 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   );
 
   server.tool(
+    "end_call",
+    "End an in-progress call immediately, identified by its call ID. Use this to hang up a call you " +
+      "started (or any active call in your account). Ending a call that has already finished is a no-op, " +
+      "so it is safe to retry. Returns the call's resulting status.",
+    {
+      call_id: z
+        .string()
+        .describe("The ID of the call to end, from list_calls or a make_call / make_conversation_call response."),
+    },
+    // Ends a live call (irreversible for that call) and affects the external
+    // phone session, but repeating on an already-ended call is a no-op.
+    { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: true },
+    async ({ call_id }) => {
+      try {
+        const result = await api.endCall(call_id);
+        const status = result.status ? ` Status: ${result.status}.` : "";
+        return ok(`Call ${call_id} ended.${status}`, result);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
     "make_call",
     "Initiate an outbound, webhook-driven phone call where your backend handles the " +
       "conversation logic.\n\n" +
@@ -865,9 +935,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("A voice ID (from list_voices) to override the agent's default voice for just this call."),
+      ...callControlInputs(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, initial_greeting, from_number_id, voice }) => {
+    async ({ agent_id, to_number, initial_greeting, from_number_id, voice, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
@@ -878,6 +949,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           withDisclosure(initial_greeting),
           from_number_id,
           voice,
+          buildCallControls(controls),
         );
         return ok(
           `Call initiated!\n  From: ${result.fromNumber}\n  To: ${result.toNumber}\n  Call ID: ${result.id}\n  Status: ${result.status}`,
@@ -924,9 +996,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("A voice ID (from list_voices) to override the agent's default voice for this call."),
+      ...callControlInputs(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
@@ -937,7 +1010,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           lockedSystemPrompt(topic),
           withDisclosure(initial_greeting),
           from_number_id,
-          voice
+          voice,
+          buildCallControls(controls),
         );
 
         return ok(
