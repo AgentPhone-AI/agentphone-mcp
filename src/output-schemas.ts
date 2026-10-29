@@ -301,6 +301,16 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
   get_call: callObject,
 
+  end_call: z
+    .object({
+      id: z.string().optional().describe("The ended call's ID."),
+      status: z.string().optional().describe("The call's resulting status after ending."),
+      endedAt: z.string().nullable().optional().describe("When the call ended (ISO 8601), or null."),
+      success: z.boolean().optional().describe("Whether the end request was accepted."),
+    })
+    .passthrough()
+    .describe("Result of ending a call."),
+
   make_call: callObject.describe("The initiated outbound call."),
 
   make_conversation_call: callObject.describe("The call, with transcript turns when available."),

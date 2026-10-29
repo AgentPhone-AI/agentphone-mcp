@@ -137,6 +137,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_messages: { title: "Get Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_calls: { title: "List Calls", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  end_call: { title: "End Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   make_call: { title: "Make Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   make_conversation_call: { title: "Make AI Conversation Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   list_agents: { title: "List Agents", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
