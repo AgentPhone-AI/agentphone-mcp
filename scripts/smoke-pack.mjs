@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { createRequire } from "node:module";
 
@@ -39,8 +39,11 @@ try {
   console.log(`  packed ${tarball}`);
 
   console.log("Installing into a clean directory...");
-  execFileSync("npm", ["init", "-y"], { cwd: workdir, stdio: "ignore" });
-  execFileSync("npm", ["install", tarballPath], { cwd: workdir, stdio: "ignore" });
+  // Keep stderr so a failed install reports npm's actual error, not just the
+  // command line. (shell:true lets this resolve npm on Windows too.)
+  const npm = (args) => execFileSync("npm", args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"], shell: process.platform === "win32" });
+  npm(["init", "-y"]);
+  npm(["install", tarballPath]);
 
   const installed = join(workdir, "node_modules", "agentphone-mcp");
 
@@ -51,7 +54,8 @@ try {
   else fail(`installed version ${installedVersion} != package.json ${expectedVersion}`);
 
   // 204 detach regression, run against the INSTALLED dist (not src).
-  const { AgentPhoneAPI } = await import(join(installed, "dist", "api.js"));
+  // Import via a file URL so the absolute path resolves on Windows too.
+  const { AgentPhoneAPI } = await import(pathToFileURL(join(installed, "dist", "api.js")).href);
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(null, { status: 204 });
   try {

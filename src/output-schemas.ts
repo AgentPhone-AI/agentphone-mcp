@@ -54,7 +54,7 @@ const agentFields = {
   voice: z.string().optional().describe("Voice ID the agent speaks with."),
   modelTier: z.string().optional().describe("Model quality/speed tier: turbo, balanced, max, or realtime."),
   transferNumber: z.string().nullable().optional().describe("E.164 number calls transfer to, or null if disabled."),
-  voicemailMessage: z.string().nullable().optional().describe("Voicemail greeting text, or null if disabled."),
+  voicemailMessage: z.string().nullable().optional().describe("Message the agent leaves when an outbound call reaches voicemail, or null if unset."),
   sttMode: z.string().optional().describe("Speech-to-text mode: fast or accurate."),
   ambientSound: z.string().optional().describe("Background ambience played on calls."),
   denoisingMode: z.string().optional().describe("Audio denoising mode applied to calls."),
