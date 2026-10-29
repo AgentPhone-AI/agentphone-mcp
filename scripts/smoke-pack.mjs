@@ -31,14 +31,17 @@ let failed = false;
 const fail = (msg) => { console.error(`  ✗ ${msg}`); failed = true; };
 const pass = (msg) => console.log(`  ✓ ${msg}`);
 
-// Resolve the npm binary per platform (npm.cmd on Windows). No shell: with
-// execFileSync the args are passed through unparsed, so a tarball path with
-// spaces (common under a Windows user profile) stays intact.
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+// This is a POSIX release/maintainer script: it runs in CI (ubuntu) and when a
+// maintainer publishes from macOS/Linux. It is intentionally not Windows-hardened
+// — invoking `npm` there hits a dead end either way (shell:true shell-parses the
+// tarball path, while spawning `npm.cmd` without a shell throws EINVAL on current
+// Node after CVE-2024-27980). Args are passed through execFileSync unparsed.
+const npm = (args, extra = {}) =>
+  execFileSync("npm", args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"], ...extra });
 
 try {
   console.log("Packing tarball (npm pack)...");
-  const packOut = execFileSync(NPM, ["pack", "--pack-destination", workdir], { cwd: root, encoding: "utf8" });
+  const packOut = execFileSync("npm", ["pack", "--pack-destination", workdir], { cwd: root, encoding: "utf8" });
   const tarball = packOut.trim().split("\n").pop().trim();
   const tarballPath = join(workdir, tarball);
   console.log(`  packed ${tarball}`);
@@ -46,7 +49,6 @@ try {
   console.log("Installing into a clean directory...");
   // Keep stderr so a failed install reports npm's actual error, not just the
   // command line.
-  const npm = (args) => execFileSync(NPM, args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"] });
   npm(["init", "-y"]);
   npm(["install", tarballPath]);
 
