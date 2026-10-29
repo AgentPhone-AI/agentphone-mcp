@@ -391,10 +391,9 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
   test_webhook: z
     .object({
-      success: z.boolean().describe("Whether the test event was delivered."),
-      statusCode: z.number().nullable().describe("HTTP status your endpoint returned, or null."),
-      responseMs: z.number().nullable().describe("Your endpoint's response time in ms, or null."),
-      error: z.string().nullable().describe("Error message if the test failed, or null."),
+      success: z.boolean().describe("Whether your endpoint accepted the test event."),
+      httpStatus: z.number().nullable().describe("HTTP status your endpoint returned, or null."),
+      errorMessage: z.string().nullable().describe("Error message if the test failed, or null."),
     })
     .passthrough()
     .describe("The result of sending a test event to the webhook."),

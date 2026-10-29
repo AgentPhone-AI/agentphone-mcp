@@ -22,6 +22,16 @@ type WebhookDelivery = {
   createdAt: string;
 };
 
+type WebhookTestResult = {
+  success: boolean;
+  // The deployed endpoints return httpStatus/errorMessage; the older
+  // statusCode/error are kept optional as a compatibility fallback.
+  httpStatus?: number | null;
+  errorMessage?: string | null;
+  statusCode?: number | null;
+  error?: string | null;
+};
+
 export class AgentPhoneAPI {
   private baseUrl: string;
   // A static key, or a getter resolved per request (used when the credential
@@ -473,12 +483,10 @@ export class AgentPhoneAPI {
   }
 
   async testAgentWebhook(agentId: string) {
-    return this.request<{
-      success: boolean;
-      statusCode: number | null;
-      responseMs: number | null;
-      error: string | null;
-    }>("POST", `/v1/agents/${encodeURIComponent(agentId)}/webhook/test`);
+    return this.request<WebhookTestResult>(
+      "POST",
+      `/v1/agents/${encodeURIComponent(agentId)}/webhook/test`
+    );
   }
 
   async listAgentWebhookDeliveries(agentId: string, limit = 20) {
@@ -788,12 +796,7 @@ export class AgentPhoneAPI {
   }
 
   async testWebhook() {
-    return this.request<{
-      success: boolean;
-      statusCode: number | null;
-      responseMs: number | null;
-      error: string | null;
-    }>("POST", "/v1/webhooks/test");
+    return this.request<WebhookTestResult>("POST", "/v1/webhooks/test");
   }
 
   async listWebhookDeliveries(limit = 20, hours?: number) {
