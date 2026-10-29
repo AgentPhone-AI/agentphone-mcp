@@ -122,25 +122,34 @@ require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_i
   }
 }
 
-// --- Readiness inputs (check_readiness, tasks#199) ---
+// --- Readiness response fields (check_readiness, tasks#199) ---
 {
-  const num = responseSchemaName(paths["/v1/numbers/{number_id}"]?.get) ;
-  const np = num ? props(spec, num) : {};
   require$(paths["/v1/numbers/{number_id}"]?.get, "missing GET /v1/numbers/{number_id} (check_readiness)");
-  for (const f of ["status", "agentId", "outboundSms", "whatsappEnabled", "inboundCallsEnabled"]) {
+  const num = responseSchemaName(paths["/v1/numbers/{number_id}"]?.get);
+  const np = num ? props(spec, num) : {};
+  for (const f of ["id", "phoneNumber", "status", "agentId", "outboundSms", "whatsappEnabled", "inboundCallsEnabled"]) {
     require$(f in np, `PhoneNumberResponse missing ${f} (read by check_readiness)`);
   }
+  require$(paths["/v1/register/status"]?.get, "missing GET /v1/register/status (check_readiness)");
   const reg = responseSchemaName(paths["/v1/register/status"]?.get);
   const rp = reg ? props(spec, reg) : {};
-  require$(paths["/v1/register/status"]?.get, "missing GET /v1/register/status (check_readiness)");
-  require$("campaign_status" in rp, "register/status response missing campaign_status (read by check_readiness)");
+  for (const f of ["campaign_status", "stage", "issue"]) {
+    require$(f in rp, `register/status response missing ${f} (read by check_readiness)`);
+  }
 }
 
 // --- Contact capabilities (check_capabilities / check_readiness, tasks#203/#199) ---
 {
   const op = paths["/v1/contacts/capabilities"]?.get;
   require$(op, "missing GET /v1/contacts/capabilities (check_capabilities)");
-  if (op) require$(paramNames(op).has("phone_number"), "GET /v1/contacts/capabilities no longer accepts query 'phone_number'");
+  if (op) {
+    require$(paramNames(op).has("phone_number"), "GET /v1/contacts/capabilities no longer accepts query 'phone_number'");
+    const cap = responseSchemaName(op);
+    const cp = cap ? props(spec, cap) : {};
+    for (const f of ["phoneNumber", "capabilities", "checkedAt"]) {
+      require$(f in cp, `capabilities response missing ${f} (read by check_capabilities/check_readiness)`);
+    }
+  }
 }
 
 // --- Detach endpoint exists (detach_number tolerates an empty 200/204 body) ---

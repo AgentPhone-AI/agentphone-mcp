@@ -179,7 +179,7 @@ The optional anonymous mode instead uses the configured server API key.
 |------|-------------|
 | `send_message` | Send SMS, iMessage, or WhatsApp. Supports media, threaded replies (`reply_to_message_id`), iMessage effects (`send_style`), existing groups (`to_number`) or new groups (`recipients`), and WhatsApp interactive content (`channel=whatsapp` with `buttons`/`list`/`cta`/`template`) |
 | `check_capabilities` | Check which channels a phone number can receive (iMessage / SMS / RCS) before sending |
-| `check_readiness` | Check a number is ready (active, assigned, channel-capable, A2P-registered) before sending/calling — returns blockers, warnings, and next steps |
+| `check_readiness` | Check a number is ready before sending/calling: active + assigned + channel-capable are hard blockers; A2P/10DLC registration and recipient reachability are warnings. Returns `ready`, blockers, warnings, and next steps (credit/concurrency are enforced at send time, not pre-checkable) |
 | `get_messages` | Get messages for a specific number. Page older history with `cursor` (from `nextCursor`); `before`/`after` are optional time filters. |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with a bounded tail of recent messages |

@@ -308,7 +308,6 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
           inboundCalls: z.boolean().optional().describe("Whether inbound calls are enabled."),
         })
         .passthrough()
-        .optional()
         .describe("Per-channel capability of the number."),
       compliance: z
         .object({
@@ -318,19 +317,19 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
         })
         .passthrough()
         .nullable()
-        .optional()
-        .describe("Account A2P/10DLC registration status; null if it couldn't be read."),
+        .describe("Account A2P/10DLC registration status; null when SMS isn't relevant or it couldn't be read."),
       recipient: z
         .object({
-          phoneNumber: z.string().optional(),
-          capabilities: z.record(z.string(), z.unknown()).optional(),
+          phoneNumber: z.string().optional().describe("The recipient number that was checked."),
+          capabilities: z.record(z.string(), z.unknown()).optional().describe("The recipient's per-channel reachability (imessage/sms/rcs)."),
         })
         .passthrough()
         .optional()
-        .describe("Recipient reachability, when to_number was supplied."),
+        .describe("Recipient reachability, present only when to_number was supplied on a messaging channel."),
       blockers: z.array(z.string()).describe("Hard issues that will cause the action to fail until fixed."),
       warnings: z.array(z.string()).describe("Soft issues that may cause failures."),
-      notChecked: z.array(z.string()).optional().describe("Readiness dimensions enforced at send time and not pre-checkable here."),
+      nextSteps: z.array(z.string()).describe("Specific actions to resolve the blockers/warnings above."),
+      notChecked: z.array(z.string()).describe("Readiness dimensions enforced at send time and not pre-checkable here (credit, concurrency)."),
     })
     .passthrough()
     .describe("Whether a number is ready to send/call, with blockers, warnings, and next steps."),
