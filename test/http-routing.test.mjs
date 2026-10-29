@@ -582,7 +582,9 @@ test("tools/list is identical across HTTP and stdio transports (tasks#202)", asy
         {
           title: tool.title ?? null,
           annotations: tool.annotations ?? {},
-          required: [...(tool.inputSchema?.required ?? [])].sort(),
+          // Compare the whole input schema (properties, types, defaults), not just
+          // required; normalize only the required ordering, which carries no meaning.
+          inputSchema: { ...(tool.inputSchema ?? {}), required: [...(tool.inputSchema?.required ?? [])].sort() },
         },
       ])
     );
@@ -615,6 +617,10 @@ test("tools/list is identical across HTTP and stdio transports (tasks#202)", asy
   assert.equal(httpTools.update_agent.annotations.destructiveHint, true);
   assert.equal(httpTools.set_webhook.annotations.destructiveHint, true);
   assert.notEqual(httpTools.test_webhook.annotations.idempotentHint, true);
+  // attach/detach are each other's inverse, so they stay non-destructive — assert
+  // it explicitly (cross-transport equality alone wouldn't catch both flipping).
+  assert.equal(httpTools.attach_number.annotations.destructiveHint, false);
+  assert.equal(httpTools.detach_number.annotations.destructiveHint, false);
 });
 
 test("stdio rejects a whitespace-only API key before any backend call", async (t) => {
