@@ -110,8 +110,9 @@ const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 const COUNTRY_REGEX = /^[A-Z]{2}$/;
 const AREA_CODE_REGEX = /^\d{3}$/;
 
-// Values from CreateAgentRequest.language and UpdateAgentRequest.language in the OpenAPI document.
-const LANGUAGE_CODES = [
+// Values from CreateAgentRequest.language and UpdateAgentRequest.language.
+// npm run check:contract verifies this list against the live OpenAPI document.
+export const LANGUAGE_CODES = [
   "af-ZA", "ar-SA", "az-AZ", "bg-BG", "bs-BA", "ca-ES", "cs-CZ", "cy-GB", "da-DK", "de-DE",
   "el-GR", "en-AU", "en-GB", "en-IN", "en-NZ", "en-US", "es-419", "es-ES", "fa-IR", "fi-FI",
   "fil-PH", "fr-CA", "fr-FR", "gl-ES", "he-IL", "hi-IN", "hr-HR", "hu-HU", "hy-AM", "id-ID",
