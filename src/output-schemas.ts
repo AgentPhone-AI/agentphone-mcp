@@ -150,8 +150,8 @@ const voiceEntry = z
     voice_id: z.string().optional().describe("Voice ID to set on an agent's voice field."),
     voice_name: z.string().optional().describe("Human-readable voice name."),
     provider: z.string().optional().describe("Voice provider."),
-    gender: z.string().optional().describe("Perceived voice gender."),
-    accent: z.string().optional().describe("Voice accent."),
+    gender: z.string().nullable().optional().describe("Perceived voice gender, or null when the provider doesn't supply it."),
+    accent: z.string().nullable().optional().describe("Voice accent, or null when the provider doesn't supply it."),
     preview_audio_url: z.string().nullable().optional().describe("URL to a sample clip, or null."),
   })
   .passthrough()
@@ -160,8 +160,8 @@ const voiceEntry = z
 const messageEntry = z
   .object({
     id: z.string().optional().describe("Message ID."),
-    from: z.string().optional().describe("Sender number (get_messages shape)."),
-    to: z.string().optional().describe("Recipient number (get_messages shape)."),
+    from: z.string().nullable().optional().describe("Sender number (get_messages shape), or null if unknown."),
+    to: z.string().nullable().optional().describe("Recipient number (get_messages shape)."),
     fromNumber: z.string().optional().describe("Sender number (conversation shape)."),
     toNumber: z.string().optional().describe("Recipient number (conversation shape)."),
     body: z.string().optional().describe("Message text."),
@@ -191,6 +191,14 @@ const listMeta = {
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   account_overview: z
     .object({
+      sectionStatus: z
+        .object({
+          agents: z.enum(["ok", "failed"]).describe("Whether the agents section loaded."),
+          numbers: z.enum(["ok", "failed"]).describe("Whether the phone-numbers section loaded."),
+          webhook: z.enum(["ok", "failed"]).describe("Whether the webhook section loaded."),
+          usage: z.enum(["ok", "failed"]).describe("Whether the usage section loaded."),
+        })
+        .describe("Per-section load status; a 'failed' section means its data could not be loaded, not that it's empty."),
       usage: usageNumbers.nullable().optional().describe("Phone-number usage; omitted if the lookup failed."),
       agents: z.array(agentObject).nullable().optional().describe("The account's agents (omitted if the lookup failed)."),
       numbers: z.array(z.object(numberFields).passthrough().describe("A phone number in the account.")).nullable().optional().describe("The account's phone numbers (omitted if the lookup failed)."),
@@ -383,10 +391,9 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
   test_webhook: z
     .object({
-      success: z.boolean().describe("Whether the test event was delivered."),
-      statusCode: z.number().nullable().describe("HTTP status your endpoint returned, or null."),
-      responseMs: z.number().nullable().describe("Your endpoint's response time in ms, or null."),
-      error: z.string().nullable().describe("Error message if the test failed, or null."),
+      success: z.boolean().describe("Whether your endpoint accepted the test event."),
+      httpStatus: z.number().nullable().describe("HTTP status your endpoint returned, or null."),
+      errorMessage: z.string().nullable().describe("Error message if the test failed, or null."),
     })
     .passthrough()
     .describe("The result of sending a test event to the webhook."),
