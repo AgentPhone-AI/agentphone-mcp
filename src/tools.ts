@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 31 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 32 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -786,6 +786,131 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       } catch (e) {
         return err(e);
       }
+    }
+  );
+
+  server.tool(
+    "check_readiness",
+    "Check whether a phone number is ready to send a message or place a call BEFORE you try, so you " +
+      "can fix predictable failures first. Verifies the number is active, assigned to an agent, and " +
+      "capable of the channel you intend, plus the account's A2P/10DLC registration (for US SMS). " +
+      "Optionally checks a recipient's reachability. Returns a ready flag with specific blockers, " +
+      "warnings, and next steps.\n\n" +
+      "Note: credit balance and concurrency limits are enforced by the server at send time and cannot " +
+      "be pre-checked here, so a ready result does not guarantee against an insufficient-credit or " +
+      "busy error.",
+    {
+      number_id: z
+        .string()
+        .describe("The number to check, from list_numbers."),
+      channel: z
+        .enum(["sms", "imessage", "whatsapp", "voice"])
+        .optional()
+        .describe("The action you intend, so readiness reflects the right capability. Omit for a general check (active + assigned)."),
+      to_number: z
+        .string()
+        .optional()
+        .describe("Optional recipient (E.164) to also check for reachability on the intended channel."),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ number_id, channel, to_number }) => {
+      if (to_number) {
+        const toErr = validateE164(to_number);
+        if (toErr) return err(new Error(toErr));
+      }
+      let number;
+      try {
+        number = await api.getNumber(number_id);
+      } catch (e) {
+        return err(e); // 404 → err() points at list_numbers
+      }
+
+      // Compliance and recipient lookups are best-effort — a failure degrades the
+      // report to a warning rather than failing the whole readiness check.
+      const [regResult, capResult] = await Promise.allSettled([
+        api.getRegisterStatus(),
+        to_number ? api.getContactCapabilities(to_number) : Promise.resolve(null),
+      ]);
+      const register = regResult.status === "fulfilled" ? regResult.value : null;
+      const recipient = capResult.status === "fulfilled" ? capResult.value : null;
+
+      const blockers: string[] = [];
+      const warnings: string[] = [];
+
+      if (number.status !== "active") {
+        blockers.push(`The number is ${number.status}, not active. Wait for activation or contact support.`);
+      }
+      if (!number.agentId) {
+        blockers.push("The number is not assigned to an agent. Attach it with attach_number before sending or calling.");
+      }
+
+      // Channel-specific capability.
+      const wantsSms = channel === "sms" || channel === "imessage" || channel === undefined;
+      if (channel === "whatsapp") {
+        if (!number.whatsappEnabled) blockers.push("WhatsApp is not enabled on this number.");
+      } else if (channel === "voice") {
+        // Outbound calling needs an active, assigned number; inbound enablement is
+        // informational for receiving calls.
+        if (!number.inboundCallsEnabled) warnings.push("Inbound calls are disabled on this number (outbound calling is unaffected).");
+      }
+      if (wantsSms) {
+        if (number.outboundSms === "registration_required") {
+          blockers.push("Outbound SMS requires A2P 10DLC registration on this number. Register the brand/campaign (see /register) before sending US SMS.");
+        } else if (number.outboundSms === "activating") {
+          warnings.push("Outbound SMS is still activating on this number; US SMS may fail until it reports 'enabled'.");
+        }
+      }
+
+      // Account-level A2P compliance (US SMS).
+      const compliant = register ? /approv|active|registered/i.test(register.campaign_status) : null;
+      if (register && compliant === false) {
+        const detail = register.issue?.message || register.stage || register.campaign_status;
+        warnings.push(`A2P registration is not yet approved (${detail}). US SMS may fail until it is.`);
+      } else if (!register) {
+        warnings.push("Could not read A2P registration status; US SMS compliance is unverified.");
+      }
+
+      // Recipient reachability vs intended channel.
+      if (to_number && recipient) {
+        const c = recipient.capabilities ?? {};
+        if (channel === "imessage" && c.imessage === false) {
+          warnings.push(`${to_number} cannot receive iMessage; it will fall back to SMS.`);
+        }
+        if ((channel === "sms" || channel === "imessage") && c.sms === false && c.imessage !== true) {
+          warnings.push(`${to_number} does not appear reachable by SMS or iMessage.`);
+        }
+      } else if (to_number && !recipient) {
+        warnings.push(`Could not check reachability for ${to_number}.`);
+      }
+
+      const ready = blockers.length === 0;
+      const structured = {
+        numberId: number.id,
+        phoneNumber: number.phoneNumber,
+        ready,
+        status: number.status,
+        assigned: Boolean(number.agentId),
+        channels: {
+          outboundSms: number.outboundSms,
+          whatsapp: number.whatsappEnabled,
+          inboundCalls: number.inboundCallsEnabled,
+        },
+        compliance: register
+          ? { campaignStatus: register.campaign_status, stage: register.stage, issue: register.issue }
+          : null,
+        recipient: recipient ? { phoneNumber: recipient.phoneNumber, capabilities: recipient.capabilities } : undefined,
+        blockers,
+        warnings,
+        notChecked: ["creditBalance", "concurrency"],
+      };
+
+      const lines = [
+        `Readiness for ${number.phoneNumber} (${number.id})${channel ? ` — ${channel}` : ""}: ${ready ? "READY" : "NOT READY"}`,
+        blockers.length ? `\nBlockers:\n${blockers.map((b) => `  - ${b}`).join("\n")}` : null,
+        warnings.length ? `\nWarnings:\n${warnings.map((w) => `  - ${w}`).join("\n")}` : null,
+        `\nNot pre-checkable (enforced at send): credit balance and concurrency limits.`,
+      ].filter(Boolean);
+      return ok(lines.join("\n"), structured);
     }
   );
 

@@ -122,6 +122,27 @@ require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_i
   }
 }
 
+// --- Readiness inputs (check_readiness, tasks#199) ---
+{
+  const num = responseSchemaName(paths["/v1/numbers/{number_id}"]?.get) ;
+  const np = num ? props(spec, num) : {};
+  require$(paths["/v1/numbers/{number_id}"]?.get, "missing GET /v1/numbers/{number_id} (check_readiness)");
+  for (const f of ["status", "agentId", "outboundSms", "whatsappEnabled", "inboundCallsEnabled"]) {
+    require$(f in np, `PhoneNumberResponse missing ${f} (read by check_readiness)`);
+  }
+  const reg = responseSchemaName(paths["/v1/register/status"]?.get);
+  const rp = reg ? props(spec, reg) : {};
+  require$(paths["/v1/register/status"]?.get, "missing GET /v1/register/status (check_readiness)");
+  require$("campaign_status" in rp, "register/status response missing campaign_status (read by check_readiness)");
+}
+
+// --- Contact capabilities (check_capabilities / check_readiness, tasks#203/#199) ---
+{
+  const op = paths["/v1/contacts/capabilities"]?.get;
+  require$(op, "missing GET /v1/contacts/capabilities (check_capabilities)");
+  if (op) require$(paramNames(op).has("phone_number"), "GET /v1/contacts/capabilities no longer accepts query 'phone_number'");
+}
+
 // --- Detach endpoint exists (detach_number tolerates an empty 200/204 body) ---
 {
   const del = paths["/v1/agents/{agent_id}/numbers/{number_id}"]?.delete;
