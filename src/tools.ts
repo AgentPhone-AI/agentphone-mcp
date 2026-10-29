@@ -668,28 +668,17 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "get_call",
     "Get details and transcript for a specific call, identified by its call ID. Returns the call's " +
-      "direction, participants, status, timestamps, and full transcript. Pass wait=true to block " +
-      "until an in-progress call finishes before returning.",
+      "direction, participants, status, timestamps, and transcript so far, as of now. A call that is " +
+      "still in progress returns its current state; call get_call again to see later updates.",
     {
       call_id: z
         .string()
         .describe("The ID of the call to fetch, from list_calls or from a make_call / make_conversation_call response."),
-      wait: z
-        .boolean()
-        .default(false)
-        .describe(
-          "When true, long-polls until the call completes before returning. " +
-            "Useful for checking back on a call you initiated earlier."
-        ),
-      timeout: z
-        .number().int().min(10).max(300)
-        .default(120)
-        .describe("How long to keep long-polling, in seconds, when wait=true, before returning the call in whatever state it has reached."),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ call_id, wait, timeout }) => {
+    async ({ call_id }) => {
       try {
-        const result = await api.getCall(call_id, { wait, timeout });
+        const result = await api.getCall(call_id);
 
         let transcript = "No transcript available.";
         if (result.transcripts && result.transcripts.length > 0) {
@@ -790,10 +779,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       "and adds AI identity instructions around the topic. No tool argument disables these additions, " +
       "but they do not guarantee the model's behavior. Calls made directly through the AgentPhone API " +
       "or SDKs bypass this connector's disclosure logic.\n" +
-      "By default (wait=true) this waits for the call to finish — up to max_wait_seconds — and " +
-      "returns the call with its transcript. If that wait elapses first, it returns the call while " +
-      "it may still be in progress (check later with get_call). With wait=false it returns " +
-      "immediately with the call's ID and status, and you fetch the transcript later with get_call.",
+      "This returns immediately with the call's ID and initial status. The call then runs on its own; " +
+      "use get_call with the call ID to fetch the transcript once it has progressed.",
     {
       agent_id: z
         .string()
@@ -810,14 +797,6 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("Text appended after the connector’s AI disclosure in the greeting sent to the API. If omitted, only the disclosure is sent."),
-      wait: z
-        .boolean()
-        .default(true)
-        .describe("When true (default), blocks until the call ends and returns the full transcript."),
-      max_wait_seconds: z
-        .number().int().min(10).max(600)
-        .default(300)
-        .describe("How long to wait for the call to finish before returning, in seconds, when wait=true."),
       from_number_id: z
         .string()
         .optional()
@@ -828,7 +807,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("A voice ID (from list_voices) to override the agent's default voice for this call."),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, topic, initial_greeting, wait, max_wait_seconds, from_number_id, voice }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
@@ -838,45 +817,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           to_number,
           lockedSystemPrompt(topic),
           withDisclosure(initial_greeting),
-          wait,
-          max_wait_seconds,
           from_number_id,
           voice
         );
-
-        const transcript = (result.transcripts ?? [])
-          .map((t) => {
-            const parts: string[] = [];
-            if (t.transcript) parts.push(`  Human: ${t.transcript}`);
-            if (t.response) parts.push(`  Agent: ${t.response}`);
-            return parts.join("\n");
-          })
-          .filter(Boolean)
-          .join("\n");
-
-        if (wait) {
-          // A wait=true request can still time out at max_wait_seconds before
-          // the call ends; endedAt tells us which actually happened, so the
-          // header matches the returned state instead of always claiming "ended".
-          const ended = Boolean(result.endedAt);
-          const lines = [
-            ended ? `Call completed!` : `Call still in progress (the wait elapsed before it ended).`,
-            `  From: ${result.fromNumber}`,
-            `  To: ${result.toNumber}`,
-            `  Call ID: ${result.id}`,
-            `  Status: ${result.status}`,
-            result.endedAt ? `  Ended: ${result.endedAt}` : null,
-            ``,
-            ended
-              ? transcript
-                ? `Transcript:\n${transcript}`
-                : `Call ended but no transcript was recorded.`
-              : transcript
-                ? `Partial transcript so far:\n${transcript}\nUse get_call with the call ID to fetch the full transcript once the call ends.`
-                : `No transcript yet — use get_call with the call ID to fetch it once the call ends.`,
-          ];
-          return ok(lines.filter(Boolean).join("\n"), result);
-        }
 
         return ok(
           [

@@ -81,6 +81,7 @@ function harness(apiStub) {
   registerTools(registrar, apiStub);
   return {
     names: () => [...tools.keys()],
+    schema: (name) => tools.get(name).schema,
     call: async (name, args) => {
       const t = tools.get(name);
       return t.handler(await z.object(t.schema).parseAsync(args ?? {}));
@@ -98,7 +99,7 @@ const ARGS = {
   list_calls: {},
   get_call: { call_id: "call_1" },
   make_call: { agent_id: "agt_1", to_number: "+14155550123" },
-  make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x", wait: false },
+  make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x" },
   list_agents: {},
   create_agent: { name: "X" },
   update_agent: { agent_id: "agt_1" },
@@ -212,22 +213,29 @@ test("list_webhook_deliveries advertises the documented delivery fields", () => 
   assert.equal(entry.createdAt.safeParse(null).success, false);
 });
 
-test("make_conversation_call wait=true text matches ended/transcript state", async () => {
-  const base = { id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "x", startedAt: "t", retellCallId: null };
-  const T = [{ id: "t1", transcript: "hi", response: "hello", createdAt: "t" }];
-  const cases = [
-    { endedAt: "t", transcripts: T, expect: [/Call completed!/, /Transcript:/], notExpect: [/in progress/] },
-    { endedAt: "t", transcripts: [], expect: [/Call completed!/, /no transcript was recorded/], notExpect: [/in progress/] },
-    { endedAt: null, transcripts: T, expect: [/still in progress/, /Partial transcript so far/, /get_call/], notExpect: [/completed!/] },
-    { endedAt: null, transcripts: [], expect: [/still in progress/, /No transcript yet/, /get_call/], notExpect: [/completed!/] },
-  ];
-  for (const c of cases) {
-    const h = harness(makeStub({ makeConversationCall: async () => ({ ...base, endedAt: c.endedAt, transcripts: c.transcripts }) }));
-    const r = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155550123", topic: "x", wait: true });
-    const text = r.content[0].text;
-    for (const re of c.expect) assert.match(text, re, `ended=${c.endedAt}, turns=${c.transcripts.length}: expected ${re}`);
-    for (const re of c.notExpect) assert.doesNotMatch(text, re, `ended=${c.endedAt}, turns=${c.transcripts.length}: should not match ${re}`);
-  }
+test("make_conversation_call returns immediately without any wait inputs (#192)", async () => {
+  const h = harness(makeStub());
+  // The schema must not advertise the removed wait/max_wait_seconds options.
+  const schema = h.schema("make_conversation_call");
+  assert.ok(!("wait" in schema), "wait input must be removed");
+  assert.ok(!("max_wait_seconds" in schema), "max_wait_seconds input must be removed");
+  // Normal call returns the initiated state immediately, pointing at get_call.
+  const r = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155550123", topic: "x" });
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /initiated/);
+  assert.match(r.content[0].text, /get_call/);
+  assert.doesNotMatch(r.content[0].text, /in progress|wait elapsed/);
+  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success);
+});
+
+test("get_call takes only call_id, with no wait/timeout, and never long-polls (#192)", async () => {
+  const schema = harness(makeStub()).schema("get_call");
+  assert.deepEqual(Object.keys(schema).sort(), ["call_id"]);
+  let argCount = -1;
+  const h = harness(makeStub({ getCall: async (...args) => { argCount = args.length; return { ...call, id: args[0] }; } }));
+  const r = await h.call("get_call", { call_id: "call_1" });
+  assert.equal(r.isError, undefined);
+  assert.equal(argCount, 1, "get_call must be called with only the id (no wait/timeout opts)");
 });
 
 test("send_message reaction mode also validates", async () => {
@@ -353,11 +361,11 @@ test("alternate success branches still return schema-valid structured content", 
   assert.equal(r.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.get_webhook.safeParse(r.structuredContent).success, "get_webhook/none");
 
-  // make_conversation_call that completed with a transcript (wait=true)
+  // make_conversation_call returns the initiated call immediately
   h = harness(makeStub());
-  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x", wait: true });
+  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x" });
   assert.equal(r.isError, undefined);
-  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success, "mcc/transcript");
+  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success, "mcc/initiated");
 
   // empty list variants that don't carry a `total`
   const emptyStub = {
