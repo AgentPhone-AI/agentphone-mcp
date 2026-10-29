@@ -136,7 +136,17 @@ export class AgentPhoneAPI {
 
   // --- SMS / Messages ---
 
-  async getMessages(numberId: string, limit = 50) {
+  async getMessages(
+    numberId: string,
+    limit = 50,
+    opts?: { before?: string; after?: string; cursor?: string }
+  ) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    // The backend treats `cursor` as the primary continuation token and ignores
+    // before/after when it is present; before/after remain time filters.
+    if (opts?.cursor !== undefined) query.set("cursor", opts.cursor);
+    if (opts?.before !== undefined) query.set("before", opts.before);
+    if (opts?.after !== undefined) query.set("after", opts.after);
     const res = await this.request<{
       data: Array<{
         id: string;
@@ -148,7 +158,8 @@ export class AgentPhoneAPI {
         receivedAt: string;
       }>;
       hasMore: boolean;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}`);
+      nextCursor?: string | null;
+    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?${query}`);
     // Normalize the sender to `from` so the formatter and output schema have a
     // single, explicit field (the API returns `from_`; keep `from` as a fallback
     // for any older shape).
@@ -656,6 +667,35 @@ export class AgentPhoneAPI {
     }>(
       "GET",
       `/v1/conversations/${encodeURIComponent(conversationId)}?message_limit=${messageLimit}`
+    );
+  }
+
+  // Cursor-paged message history for a conversation. Unlike getConversation
+  // (which returns the conversation detail with a bounded tail of messages),
+  // this reaches arbitrarily far back by following nextCursor.
+  async getConversationMessages(
+    conversationId: string,
+    limit = 50,
+    opts?: { before?: string; after?: string; cursor?: string }
+  ) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (opts?.cursor !== undefined) query.set("cursor", opts.cursor);
+    if (opts?.before !== undefined) query.set("before", opts.before);
+    if (opts?.after !== undefined) query.set("after", opts.after);
+    return this.request<{
+      data: Array<{
+        id: string;
+        body: string;
+        fromNumber: string;
+        toNumber: string;
+        direction: string;
+        receivedAt: string;
+      }>;
+      hasMore: boolean;
+      nextCursor?: string | null;
+    }>(
+      "GET",
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?${query}`
     );
   }
 

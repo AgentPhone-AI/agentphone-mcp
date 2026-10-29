@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 28 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 29 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -160,6 +160,42 @@ function lockedSystemPrompt(topic: string): string {
   );
 }
 
+// Shared cursor-pagination inputs for message history. `cursor` is the primary
+// way to reach older pages (it survives identical timestamps); before/after are
+// optional time filters, and the backend ignores them when a cursor is present.
+function cursorInputs() {
+  return {
+    before: z
+      .string()
+      .datetime({ offset: true })
+      .optional()
+      .describe("Optional time filter: only messages before this ISO 8601 timestamp. Ignored when cursor is set."),
+    after: z
+      .string()
+      .datetime({ offset: true })
+      .optional()
+      .describe("Optional time filter: only messages after this ISO 8601 timestamp. Ignored when cursor is set."),
+    cursor: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Opaque nextCursor from a previous page; the reliable way to fetch the next page. Takes precedence over before/after."),
+  };
+}
+
+// Continuation footer for a cursor-paged message result. The backend returns a
+// nextCursor whenever hasMore is true; the no-cursor branch is a defensive
+// fallback, not the normal path.
+function pageFooter(
+  result: { hasMore: boolean; nextCursor?: string | null },
+  continueHint: string
+): string {
+  if (!result.hasMore) return "";
+  return result.nextCursor
+    ? `\n\nMore available. ${continueHint} cursor=${JSON.stringify(result.nextCursor)} to fetch the next page.`
+    : "\n\nMore results exist, but the API did not return a next cursor. Narrow the range with before/after; note that time filters can omit messages that share a page boundary.";
+}
+
 export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   // ============================================================
   // Account Overview
@@ -211,6 +247,25 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           usage: results[3].status === "fulfilled" ? "ok" : "failed",
         };
 
+        // The overview loads only the first page (100) of agents and numbers.
+        // Report whether that page is complete so a large account is never
+        // silently truncated; list_agents / list_numbers page through the rest.
+        const OVERVIEW_PAGE = 100;
+        const sectionTruncation = (
+          section: { data: unknown[]; total?: number } | null
+        ) =>
+          section
+            ? {
+                returned: section.data.length,
+                total: section.total ?? section.data.length,
+                hasMore: (section.total ?? section.data.length) > section.data.length,
+              }
+            : null;
+        const truncation = {
+          agents: sectionTruncation(agents),
+          numbers: sectionTruncation(numbers),
+        };
+
         const sections: string[] = [];
 
         sections.push(`=== Account Overview ===`);
@@ -225,7 +280,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
         if (agents) {
           if (agents.data.length > 0) {
-            sections.push(`--- Agents (${agents.data.length}) ---`);
+            const t = truncation.agents;
+            const header = t && t.hasMore
+              ? `--- Agents (showing ${t.returned} of ${t.total}; use list_agents with offset for the rest) ---`
+              : `--- Agents (${agents.data.length}) ---`;
+            sections.push(header);
             for (const a of agents.data) {
               const nums =
                 a.numbers && a.numbers.length > 0
@@ -247,7 +306,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
         if (numbers) {
           if (numbers.data.length > 0) {
-            sections.push(`--- Phone Numbers (${numbers.data.length}) ---`);
+            const t = truncation.numbers;
+            const header = t && t.hasMore
+              ? `--- Phone Numbers (showing ${t.returned} of ${t.total}; use list_numbers with offset for the rest) ---`
+              : `--- Phone Numbers (${numbers.data.length}) ---`;
+            sections.push(header);
             for (const n of numbers.data) {
               const agent = n.agentId
                 ? `agent=${n.agentId}`
@@ -288,6 +351,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
         return ok(sections.join("\n"), {
           sectionStatus,
+          truncation,
           usage: usage?.numbers,
           agents: agents?.data,
           numbers: numbers?.data,
@@ -566,27 +630,35 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "get_messages",
     "Get SMS messages for a specific phone number, identified by its number ID. Returns a list of " +
       "individual messages — each with its timestamp, sender, recipient, and text — rather than " +
-      "grouped conversation threads.",
+      "grouped conversation threads. Results are newest first. To page through older history, pass " +
+      "the nextCursor from one response as cursor on the next; before/after are optional time filters only.",
     {
       number_id: z.string().describe("The ID of the number whose messages you want, from list_numbers."),
       limit: z
         .number().int().min(1).max(200)
         .default(50)
-        .describe("How many of the most recent messages to return."),
+        .describe("How many messages to return in one page."),
+      ...cursorInputs(),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ number_id, limit }) => {
+    async ({ number_id, limit, before, after, cursor }) => {
       try {
-        const result = await api.getMessages(number_id, limit);
+        const result = await api.getMessages(number_id, limit, { before, after, cursor });
         if (result.data.length === 0) {
-          return ok("No messages found for this number.", result);
+          const empty = cursor
+            ? "No more messages on this page."
+            : before || after
+              ? "No messages found for this number in the requested time range."
+              : "No messages found for this number.";
+          return ok(empty, result);
         }
 
         const formatted = result.data
           .map((m) => `[${m.receivedAt}] ${m.from ?? "unknown"} → ${m.to ?? "unknown"}: ${m.body}`)
           .join("\n");
 
-        return ok(`${result.data.length} message(s):\n\n${formatted}`, result);
+        const footer = pageFooter(result, `Call get_messages again with the same number_id and`);
+        return ok(`${result.data.length} message(s):\n\n${formatted}${footer}`, result);
       } catch (e) {
         return err(e);
       }
@@ -599,8 +671,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_calls",
-    "List recent calls. Scope by agent_id or number_id, or use status/direction/search to filter globally.\n\n" +
-      "When agent_id or number_id is passed, status/direction/search filters are not applied.\n" +
+    "List recent calls. Choose ONE scope: the whole account (default), a single agent_id, or a single number_id.\n\n" +
+      "The status, direction, and search filters are only supported on the account-wide list. They cannot be " +
+      "combined with agent_id or number_id, and passing them together is rejected rather than silently ignored. " +
+      "The response reports the scope and the filters actually applied.\n" +
       "Returns call summaries including each call's ID, direction, participants, and status.",
     {
       agent_id: z
@@ -621,6 +695,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("How many calls to skip before this page, for paging."),
       status: z
         .string()
+        .min(1)
         .optional()
         .describe("Keep only calls in this state, e.g. ringing, in-progress, completed, failed, busy, or no-answer."),
       direction: z
@@ -629,23 +704,67 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("Keep only inbound calls, or only outbound calls."),
       search: z
         .string()
+        .min(1)
         .optional()
         .describe("Match calls by phone number or keyword."),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, number_id, limit, offset, status, direction, search }) => {
       try {
-        let result;
-        if (number_id) {
-          result = await api.listCallsForNumber(number_id, limit, offset);
-        } else if (agent_id) {
-          result = await api.listAgentCalls(agent_id, limit, offset);
-        } else {
-          result = await api.listCalls(limit, offset, { status, direction, search });
+        // Reject ambiguous or unsupported combinations up front, with a precise
+        // correction, instead of silently dropping filters or picking a winner.
+        if (agent_id && number_id) {
+          return err(
+            new Error(
+              "Pass either agent_id or number_id, not both. Choose one scope, or omit both to list the whole account."
+            )
+          );
+        }
+        const requested: string[] = [];
+        if (status !== undefined) requested.push("status");
+        if (direction !== undefined) requested.push("direction");
+        if (search !== undefined) requested.push("search");
+        const scopeId = number_id ? "number_id" : agent_id ? "agent_id" : null;
+        if (scopeId && requested.length > 0) {
+          return err(
+            new Error(
+              `The ${requested.join(", ")} filter${requested.length > 1 ? "s are" : " is"} not supported when scoping by ${scopeId}. ` +
+                `Drop ${scopeId} to filter the account-wide list, or drop ${requested.join("/")} to list calls for this ${scopeId === "number_id" ? "number" : "agent"}.`
+            )
+          );
         }
 
+        let result;
+        let scope: string;
+        let appliedFilters: Record<string, string>;
+        if (number_id) {
+          result = await api.listCallsForNumber(number_id, limit, offset);
+          scope = `number_id=${number_id}`;
+          appliedFilters = {};
+        } else if (agent_id) {
+          result = await api.listAgentCalls(agent_id, limit, offset);
+          scope = `agent_id=${agent_id}`;
+          appliedFilters = {};
+        } else {
+          result = await api.listCalls(limit, offset, { status, direction, search });
+          scope = "account";
+          appliedFilters = {
+            ...(status !== undefined ? { status } : {}),
+            ...(direction !== undefined ? { direction } : {}),
+            ...(search !== undefined ? { search } : {}),
+          };
+        }
+
+        const filterText =
+          Object.keys(appliedFilters).length > 0
+            ? Object.entries(appliedFilters).map(([k, v]) => `${k}=${v}`).join(", ")
+            : "none";
+        // Echo the effective scope/filters so clients never have to infer them
+        // from the tool description.
+        const structured = { ...result, scope, appliedFilters };
+
         if (result.data.length === 0) {
-          return ok("No calls found.", result);
+          return ok(`No calls found. (scope: ${scope}; filters: ${filterText})`, structured);
         }
 
         const formatted = result.data
@@ -656,8 +775,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           .join("\n");
 
         return ok(
-          `${result.data.length} call(s):\n\n${formatted}\n\nTotal: ${result.total}\n\nUse get_call with the id= value to fetch transcript.`,
-          result
+          `${result.data.length} call(s) (scope: ${scope}; filters: ${filterText}):\n\n${formatted}\n\nTotal: ${result.total}\n\nUse get_call with the id= value to fetch transcript.`,
+          structured
         );
       } catch (e) {
         return err(e);
@@ -845,20 +964,32 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "list_agents",
-    "List agents in your account (a single page, sized by limit). An agent is required before you " +
-      "can make calls — it owns phone numbers and handles voice/SMS. Returns each agent's ID, name, " +
-      "voice configuration, and attached phone numbers.",
+    "List agents in your account, one page at a time. An agent is required before you can make " +
+      "calls — it owns phone numbers and handles voice/SMS. Returns each agent's ID, name, voice " +
+      "configuration, and attached phone numbers. Use offset to page through accounts with more " +
+      "agents than fit in one page; the response reports total and whether more remain.",
     {
       limit: z
         .number().int().min(1).max(100)
         .default(20)
         .describe("How many agents to return in one page."),
+      offset: z
+        .number().int().min(0)
+        .default(0)
+        .describe("How many agents to skip before this page, for paging through a long list."),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ limit }) => {
+    async ({ limit, offset }) => {
       try {
-        const result = await api.listAgents(limit);
-        return ok(JSON.stringify(result, null, 2), result);
+        const result = await api.listAgents(limit, offset);
+        // The agents endpoint returns total but no hasMore; derive it so clients
+        // get an explicit truncation/continuation signal.
+        const hasMore = offset + result.data.length < result.total;
+        const structured = { ...result, hasMore };
+        const footer = hasMore
+          ? `\n\nShowing ${offset + 1}-${offset + result.data.length} of ${result.total}. Call list_agents again with offset=${offset + result.data.length} for the next page.`
+          : "";
+        return ok(`${JSON.stringify(structured, null, 2)}${footer}`, structured);
       } catch (e) {
         return err(e);
       }
@@ -1309,6 +1440,45 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
             .join("\n"),
           result
         );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "get_conversation_messages",
+    "Page through a conversation's full message history, identified by its conversation ID. Unlike " +
+      "get_conversation (which returns the conversation detail with only a bounded tail of recent " +
+      "messages), this reaches arbitrarily far back: pass the nextCursor from one response as cursor " +
+      "on the next. Results are newest first; before/after are optional time filters only.",
+    {
+      conversation_id: z.string().describe("The ID of the conversation whose messages you want, from list_conversations."),
+      limit: z
+        .number().int().min(1).max(200)
+        .default(50)
+        .describe("How many messages to return in one page."),
+      ...cursorInputs(),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ conversation_id, limit, before, after, cursor }) => {
+      try {
+        const result = await api.getConversationMessages(conversation_id, limit, { before, after, cursor });
+        if (result.data.length === 0) {
+          const empty = cursor
+            ? "No more messages on this page."
+            : before || after
+              ? "No messages in the requested time range."
+              : "No messages in this conversation.";
+          return ok(empty, result);
+        }
+
+        const formatted = result.data
+          .map((m) => `[${m.receivedAt}] ${m.direction} ${m.fromNumber} → ${m.toNumber}: ${m.body}`)
+          .join("\n");
+
+        const footer = pageFooter(result, `Call get_conversation_messages again with the same conversation_id and`);
+        return ok(`${result.data.length} message(s):\n\n${formatted}${footer}`, result);
       } catch (e) {
         return err(e);
       }

@@ -48,8 +48,11 @@ function makeStub(overrides = {}) {
     detachNumber: async () => ({ success: true }),
     listConversations: async () => ({ data: [conv], hasMore: false, total: 1 }),
     getConversation: async () => convFull,
+    getConversationMessages: async () => ({ data: [convFull.messages[0]], hasMore: false, nextCursor: null }),
     updateConversation: async () => conv,
     listCalls: async () => ({ data: [call], hasMore: false, total: 1 }),
+    listCallsForNumber: async () => ({ data: [call], hasMore: false, total: 1 }),
+    listAgentCalls: async () => ({ data: [call], hasMore: false, total: 1 }),
     getCall: async () => call,
     makeCall: async () => ({ id: "call_1", fromNumber: "+1415", toNumber: "+1310", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }),
     makeConversationCall: async () => call,
@@ -110,6 +113,7 @@ const ARGS = {
   list_voices: {},
   list_conversations: {},
   get_conversation: { conversation_id: "conv_1" },
+  get_conversation_messages: { conversation_id: "conv_1" },
   update_conversation: { conversation_id: "conv_1", metadata: { a: 1 } },
   list_contacts: {},
   manage_contact: { action: "create", phone_number: "+14155550123", name: "Jo" },
@@ -183,9 +187,145 @@ test("timeouts: outcome-unknown for mutations, safe retry for reads (#198)", asy
   assert.doesNotMatch(r.content[0].text, /UNKNOWN/);
 });
 
+test("get_messages follows the cursor across identical-timestamp pages with no gaps (#196)", async () => {
+  // Two pages whose messages all share the SAME timestamp — the exact case a
+  // before/after time filter cannot page reliably. Following nextCursor must
+  // return every message exactly once.
+  const TS = "2026-01-01T00:00:00.000Z";
+  const page1 = { data: [{ id: "m1", from: "+1", to: "+2", body: "a", receivedAt: TS }, { id: "m2", from: "+1", to: "+2", body: "b", receivedAt: TS }], hasMore: true, nextCursor: "CUR2" };
+  const page2 = { data: [{ id: "m3", from: "+1", to: "+2", body: "c", receivedAt: TS }], hasMore: false, nextCursor: null };
+  const calls = [];
+  const h = harness(makeStub({
+    getMessages: async (numberId, limit, opts) => { calls.push({ numberId, limit, opts }); return opts?.cursor === "CUR2" ? page2 : page1; },
+  }));
+
+  const r1 = await h.call("get_messages", { number_id: "num_1", limit: 2 });
+  assert.equal(r1.structuredContent.hasMore, true);
+  assert.equal(r1.structuredContent.nextCursor, "CUR2");
+  assert.match(r1.content[0].text, /cursor="CUR2"/);
+
+  const r2 = await h.call("get_messages", { number_id: "num_1", limit: 2, cursor: "CUR2" });
+  assert.equal(r2.structuredContent.hasMore, false);
+  assert.doesNotMatch(r2.content[0].text, /More available/);
+
+  // Cursor was forwarded to the API, not before/after.
+  assert.equal(calls[1].opts.cursor, "CUR2");
+  // Union of ids: every message once, no omissions or duplicates.
+  const ids = [...r1.structuredContent.data, ...r2.structuredContent.data].map((m) => m.id);
+  assert.deepEqual(ids, ["m1", "m2", "m3"]);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("get_messages reports an empty terminal page distinctly (#196)", async () => {
+  const h = harness(makeStub({ getMessages: async () => ({ data: [], hasMore: false, nextCursor: null }) }));
+  const r = await h.call("get_messages", { number_id: "num_1", cursor: "LAST" });
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /No more messages/);
+  assert.ok(OUTPUT_SCHEMAS.get_messages.safeParse(r.structuredContent).success);
+});
+
+test("get_conversation_messages pages a conversation by cursor (#196)", async () => {
+  const TS = "2026-01-01T00:00:00.000Z";
+  const calls = [];
+  const h = harness(makeStub({
+    getConversationMessages: async (id, limit, opts) => {
+      calls.push({ id, opts });
+      return opts?.cursor
+        ? { data: [{ id: "c2", body: "y", fromNumber: "+2", toNumber: "+1", direction: "outbound", receivedAt: TS }], hasMore: false, nextCursor: null }
+        : { data: [{ id: "c1", body: "x", fromNumber: "+1", toNumber: "+2", direction: "inbound", receivedAt: TS }], hasMore: true, nextCursor: "N" };
+    },
+  }));
+  const r1 = await h.call("get_conversation_messages", { conversation_id: "conv_1" });
+  assert.equal(r1.structuredContent.nextCursor, "N");
+  assert.match(r1.content[0].text, /cursor="N"/);
+  const r2 = await h.call("get_conversation_messages", { conversation_id: "conv_1", cursor: "N" });
+  assert.equal(r2.structuredContent.hasMore, false);
+  assert.equal(calls[1].opts.cursor, "N");
+  assert.ok(OUTPUT_SCHEMAS.get_conversation_messages.safeParse(r2.structuredContent).success);
+});
+
+test("list_agents exposes offset and a truncation/continuation signal (#196)", async () => {
+  const calls = [];
+  const h = harness(makeStub({
+    listAgents: async (limit, offset) => { calls.push({ limit, offset }); return { data: [agent, agent], total: 5 }; },
+  }));
+  const r = await h.call("list_agents", { limit: 2, offset: 0 });
+  assert.equal(calls[0].offset, 0);
+  assert.equal(r.structuredContent.hasMore, true);
+  assert.match(r.content[0].text, /of 5/);
+  assert.match(r.content[0].text, /offset=2/);
+  // Last page: no continuation.
+  const h2 = harness(makeStub({ listAgents: async () => ({ data: [agent], total: 1 }) }));
+  const r2 = await h2.call("list_agents", { limit: 2, offset: 0 });
+  assert.equal(r2.structuredContent.hasMore, false);
+  assert.doesNotMatch(r2.content[0].text, /next page/);
+});
+
+test("account_overview marks truncated agent/number sections (#196)", async () => {
+  const many = Array.from({ length: 100 }, () => agent);
+  const h = harness(makeStub({
+    listAgents: async () => ({ data: many, total: 250 }),
+    listNumbers: async () => ({ data: many.map(() => num), hasMore: true, total: 180 }),
+  }));
+  const r = await h.call("account_overview", {});
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.truncation.agents.hasMore, true);
+  assert.equal(r.structuredContent.truncation.agents.total, 250);
+  assert.equal(r.structuredContent.truncation.numbers.hasMore, true);
+  assert.match(r.content[0].text, /showing 100 of 250/);
+  assert.match(r.content[0].text, /showing 100 of 180/);
+  assert.ok(OUTPUT_SCHEMAS.account_overview.safeParse(r.structuredContent).success);
+});
+
+test("list_calls composes supported filters or rejects unsupported combinations (#196)", async () => {
+  // Account-wide: filters forwarded and echoed back.
+  const seen = {};
+  let h = harness(makeStub({ listCalls: async (l, o, f) => { seen.f = f; return { data: [call], hasMore: false, total: 1 }; } }));
+  let r = await h.call("list_calls", { status: "completed", direction: "inbound", search: "+1310" });
+  assert.deepEqual(seen.f, { status: "completed", direction: "inbound", search: "+1310" });
+  assert.equal(r.structuredContent.scope, "account");
+  assert.deepEqual(r.structuredContent.appliedFilters, { status: "completed", direction: "inbound", search: "+1310" });
+  assert.match(r.content[0].text, /status=completed/);
+
+  // Scoped to a number: dispatches to the number endpoint with pagination,
+  // applies no filters.
+  const numCalls = [];
+  h = harness(makeStub({ listCallsForNumber: async (id, limit, offset) => { numCalls.push({ id, limit, offset }); return { data: [call], hasMore: false, total: 1 }; } }));
+  r = await h.call("list_calls", { number_id: "num_1", limit: 5, offset: 10 });
+  assert.deepEqual(numCalls, [{ id: "num_1", limit: 5, offset: 10 }]);
+  assert.equal(r.structuredContent.scope, "number_id=num_1");
+  assert.deepEqual(r.structuredContent.appliedFilters, {});
+
+  // Scoped to an agent: dispatches to the agent endpoint with pagination.
+  const agtCalls = [];
+  h = harness(makeStub({ listAgentCalls: async (id, limit, offset) => { agtCalls.push({ id, limit, offset }); return { data: [call], hasMore: false, total: 1 }; } }));
+  r = await h.call("list_calls", { agent_id: "agt_1", limit: 7, offset: 0 });
+  assert.deepEqual(agtCalls, [{ id: "agt_1", limit: 7, offset: 0 }]);
+  assert.equal(r.structuredContent.scope, "agent_id=agt_1");
+  assert.deepEqual(r.structuredContent.appliedFilters, {});
+
+  // Restore the filter-recording harness for the remaining rejection cases.
+  h = harness(makeStub({ listCalls: async () => ({ data: [call], hasMore: false, total: 1 }) }));
+
+  // number_id + a filter -> explicit error, not silent drop.
+  r = await h.call("list_calls", { number_id: "num_1", status: "completed" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /not supported when scoping by number_id/);
+
+  // agent_id + a filter -> explicit error.
+  r = await h.call("list_calls", { agent_id: "agt_1", direction: "inbound" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /not supported when scoping by agent_id/);
+
+  // Both IDs -> explicit error, no silent precedence.
+  r = await h.call("list_calls", { agent_id: "agt_1", number_id: "num_1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /not both/);
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 28);
+  assert.equal(registered.size, 29);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -387,7 +527,7 @@ test("alternate success branches still return schema-valid structured content", 
 const REQUIRED = {
   list_numbers: ["data"],
   get_messages: ["data"],
-  list_calls: ["data"],
+  list_calls: ["data", "scope", "appliedFilters"],
   list_agents: ["data"],
   list_voices: ["data"],
   list_conversations: ["data"],
@@ -401,6 +541,7 @@ const REQUIRED = {
   get_agent: ["id"],
   send_message: ["id"],
   get_conversation: ["id"],
+  get_conversation_messages: ["data"],
   update_conversation: ["id"],
   delete_agent: ["success", "id", "name"],
   attach_number: ["agentId", "number"],
@@ -408,7 +549,7 @@ const REQUIRED = {
   delete_webhook: ["success"],
   test_webhook: ["success", "httpStatus", "errorMessage"],
 };
-const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null };
+const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {} };
 
 test("every required output field is enforced (omitting any one fails)", () => {
   for (const [tool, fields] of Object.entries(REQUIRED)) {

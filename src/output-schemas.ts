@@ -186,6 +186,23 @@ const listMeta = {
   total: z.number().optional().describe("Total matching records across all pages."),
 };
 
+// Opaque cursor continuation shared by cursor-paged message history.
+const nextCursor = z
+  .string()
+  .nullable()
+  .optional()
+  .describe("Opaque cursor for the next page; pass it back as cursor. null/absent when there is no next page.");
+
+// Completeness of a single page drawn against a larger total (used by
+// account_overview to signal truncated agent/number sections).
+const pageCompleteness = z
+  .object({
+    returned: z.number().describe("Items included in this section."),
+    total: z.number().describe("Total items available across all pages."),
+    hasMore: z.boolean().describe("Whether more items exist beyond what this section shows."),
+  })
+  .nullable();
+
 // --- Per-tool output schemas ---
 
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -199,6 +216,12 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
           usage: z.enum(["ok", "failed"]).describe("Whether the usage section loaded."),
         })
         .describe("Per-section load status; a 'failed' section means its data could not be loaded, not that it's empty."),
+      truncation: z
+        .object({
+          agents: pageCompleteness.describe("Agent-page completeness, or null if agents failed to load."),
+          numbers: pageCompleteness.describe("Number-page completeness, or null if numbers failed to load."),
+        })
+        .describe("Whether the agents/numbers sections show the full set; hasMore=true means page the rest with list_agents / list_numbers."),
       usage: usageNumbers.nullable().optional().describe("Phone-number usage; omitted if the lookup failed."),
       agents: z.array(agentObject).nullable().optional().describe("The account's agents (omitted if the lookup failed)."),
       numbers: z.array(z.object(numberFields).passthrough().describe("A phone number in the account.")).nullable().optional().describe("The account's phone numbers (omitted if the lookup failed)."),
@@ -259,14 +282,22 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       data: z.array(messageEntry).describe("Messages for the number, newest first."),
       ...listMeta,
+      nextCursor,
     })
     .passthrough()
-    .describe("Messages for a specific phone number."),
+    .describe("A page of messages for a specific phone number."),
 
   list_calls: z
-    .object({ data: z.array(callObject).describe("Calls on this page."), ...listMeta })
+    .object({
+      data: z.array(callObject).describe("Calls on this page."),
+      ...listMeta,
+      scope: z.string().describe("The scope this page was drawn from: 'account', 'agent_id=...', or 'number_id=...'."),
+      appliedFilters: z
+        .record(z.string(), z.string())
+        .describe("The status/direction/search filters actually applied (empty object when scoped to an agent or number)."),
+    })
     .passthrough()
-    .describe("A page of calls."),
+    .describe("A page of calls, with the effective scope and applied filters."),
 
   get_call: callObject,
 
@@ -327,6 +358,15 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     })
     .passthrough()
     .describe("One SMS conversation with its message history."),
+
+  get_conversation_messages: z
+    .object({
+      data: z.array(messageEntry).describe("Messages in the conversation, newest first."),
+      ...listMeta,
+      nextCursor,
+    })
+    .passthrough()
+    .describe("A page of a conversation's message history."),
 
   update_conversation: z.object(conversationFields).passthrough().describe("The conversation after its metadata was updated."),
 

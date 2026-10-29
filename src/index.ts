@@ -143,6 +143,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   list_voices: { title: "List Voices", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_conversations: { title: "List Conversations", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_conversation: { title: "Get Conversation", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  get_conversation_messages: { title: "Get Conversation Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   list_contacts: { title: "List Contacts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   manage_contact: { title: "Manage Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -153,6 +154,27 @@ const TOOL_META: Record<string, ToolMeta> = {
   test_webhook: { title: "Test Webhook", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   list_webhook_deliveries: { title: "List Webhook Deliveries", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
+
+// One authoritative annotation set per tool, identical on HTTP and stdio: the
+// title and all three compatibility-checked hints come from TOOL_META, with any
+// extra inline hints (e.g. idempotentHint) preserved. Keeping both transports on
+// this helper prevents the title/hint drift that platform checks flag.
+function resolveToolMeta(
+  name: string,
+  passed: Record<string, unknown>
+): { title: string | undefined; annotations: Record<string, unknown> } {
+  const meta = TOOL_META[name];
+  const { title: passedTitle, ...passedHints } = passed;
+  const annotations = meta
+    ? {
+        ...passedHints,
+        readOnlyHint: meta.readOnlyHint,
+        destructiveHint: meta.destructiveHint,
+        openWorldHint: meta.openWorldHint,
+      }
+    : passedHints;
+  return { title: meta?.title ?? (passedTitle as string | undefined), annotations };
+}
 
 // ---------------------------------------------------------------------------
 // stdio transport (default for local clients)
@@ -189,14 +211,17 @@ async function startStdio(): Promise<void> {
       const handler = (
         typeof annotationsOrHandler === "function" ? annotationsOrHandler : maybeHandler
       )!;
-      const annotations =
-        typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler;
+      const passed = (
+        typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler
+      ) as Record<string, unknown>;
+      // Same authoritative title + hints as the HTTP path (see resolveToolMeta).
+      const { title, annotations } = resolveToolMeta(name, passed);
       const config: Record<string, unknown> = {
         description,
         inputSchema: schema ?? {},
         annotations,
       };
-      if (TOOL_META[name]?.title) config.title = TOOL_META[name].title;
+      if (title) config.title = title;
       if (OUTPUT_SCHEMAS[name]) config.outputSchema = OUTPUT_SCHEMAS[name];
       (server as any).registerTool(name, config, handler);
     },
@@ -473,24 +498,12 @@ async function startHttp(): Promise<void> {
       )!;
       // Authoritative title + complete behavior hints come from TOOL_META so
       // every tool satisfies the platform compatibility checks (top-level title
-      // + all three of readOnlyHint/destructiveHint/openWorldHint). Fall back to
-      // whatever tools.ts passed inline for any tool not in the map.
-      const meta = TOOL_META[name];
+      // + all three of readOnlyHint/destructiveHint/openWorldHint), identical to
+      // the stdio path (see resolveToolMeta).
       const passed = (
         typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler
       ) as Record<string, unknown>;
-      const { title: passedTitle, ...passedHints } = passed;
-      const annotations = meta
-        ? {
-            // Keep any inline hints tools.ts set (e.g. idempotentHint) and
-            // override only the three the compatibility checker mandates.
-            ...passedHints,
-            readOnlyHint: meta.readOnlyHint,
-            destructiveHint: meta.destructiveHint,
-            openWorldHint: meta.openWorldHint,
-          }
-        : passedHints;
-      const title = meta?.title ?? (passedTitle as string | undefined);
+      const { title, annotations } = resolveToolMeta(name, passed);
       server.tool(
         {
           name,

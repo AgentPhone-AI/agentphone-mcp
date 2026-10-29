@@ -539,6 +539,16 @@ test("HTTP and stdio enforce webhook defaults and reaction validation through th
       t.after(() => client.close());
       await client.connect(transport);
       const listed = (await client.listTools()).tools;
+      // Every tool must ship an authoritative title and the full behavior-hint
+      // set from TOOL_META (not just the inline readOnly/idempotent hints), or
+      // platform compatibility checks see an untitled, under-annotated tool.
+      for (const tool of listed) {
+        assert.ok(tool.title && tool.title.length > 0, `${tool.name}: missing title (add a TOOL_META entry)`);
+        const a = tool.annotations ?? {};
+        for (const hint of ["readOnlyHint", "destructiveHint", "openWorldHint"]) {
+          assert.equal(typeof a[hint], "boolean", `${tool.name}: missing ${hint} (add a TOOL_META entry)`);
+        }
+      }
       for (const name of ["get_webhook", "set_webhook"]) {
         const schema = listed.find((tool) => tool.name === name).inputSchema;
         assert.equal(schema.properties.reveal_secret.default, false);
