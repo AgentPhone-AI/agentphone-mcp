@@ -301,6 +301,7 @@ test("list_calls composes supported filters or rejects unsupported combinations 
   r = await h.call("list_calls", { agent_id: "agt_1", limit: 7, offset: 0 });
   assert.deepEqual(agtCalls, [{ id: "agt_1", limit: 7, offset: 0 }]);
   assert.equal(r.structuredContent.scope, "agent_id=agt_1");
+  assert.deepEqual(r.structuredContent.appliedFilters, {});
 
   // Restore the filter-recording harness for the remaining rejection cases.
   h = harness(makeStub({ listCalls: async () => ({ data: [call], hasMore: false, total: 1 }) }));
