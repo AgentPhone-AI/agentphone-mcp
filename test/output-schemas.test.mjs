@@ -54,6 +54,7 @@ function makeStub(overrides = {}) {
     listCallsForNumber: async () => ({ data: [call], hasMore: false, total: 1 }),
     listAgentCalls: async () => ({ data: [call], hasMore: false, total: 1 }),
     getCall: async () => call,
+    endCall: async () => ({ id: "call_1", status: "completed", endedAt: "t", success: true }),
     makeCall: async () => ({ id: "call_1", fromNumber: "+1415", toNumber: "+1310", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }),
     makeConversationCall: async () => call,
     listContacts: async () => ({ data: [contact], hasMore: false, total: 1 }),
@@ -101,6 +102,7 @@ const ARGS = {
   get_messages: { number_id: "num_1" },
   list_calls: {},
   get_call: { call_id: "call_1" },
+  end_call: { call_id: "call_1" },
   make_call: { agent_id: "agt_1", to_number: "+14155550123" },
   make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x" },
   list_agents: {},
@@ -358,9 +360,58 @@ test("mutation success is tracked separately from serialization (tasks#205)", as
   assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(ok2.structuredContent).success);
 });
 
+test("end_call ends a call and tolerates an already-ended call (#204)", async () => {
+  const calls = [];
+  const h = harness(makeStub({ endCall: async (id) => { calls.push(id); return { id, status: "completed", endedAt: "t", success: true }; } }));
+  const r = await h.call("end_call", { call_id: "call_1" });
+  assert.equal(r.isError, undefined);
+  assert.deepEqual(calls, ["call_1"]);
+  assert.match(r.content[0].text, /ended/);
+  assert.ok(OUTPUT_SCHEMAS.end_call.safeParse(r.structuredContent).success);
+  // Idempotent in behavior: a minimal/empty backend response still validates.
+  const h2 = harness(makeStub({ endCall: async () => ({}) }));
+  const r2 = await h2.call("end_call", { call_id: "call_1" });
+  assert.equal(r2.isError, undefined);
+  assert.ok(OUTPUT_SCHEMAS.end_call.safeParse(r2.structuredContent).success);
+});
+
+test("call tools forward recording/variables/model-tier/screening controls (#204)", async () => {
+  for (const tool of ["make_call", "make_conversation_call"]) {
+    let body;
+    const stub = tool === "make_call"
+      ? { makeCall: async (a, n, g, f, v, opts) => { body = opts; return { id: "call_1", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }; } }
+      : { makeConversationCall: async (a, n, s, g, f, v, opts) => { body = opts; return call; } };
+    const h = harness(makeStub(stub));
+    const args = {
+      agent_id: "agt_1", to_number: "+14155550123",
+      disable_recording: true, variables: { customerName: "Sam" }, model_tier: "max",
+      call_screening_identity: "Acme", call_screening_purpose: "reminder",
+      ...(tool === "make_conversation_call" ? { topic: "x" } : {}),
+    };
+    const r = await h.call(tool, args);
+    assert.equal(r.isError, undefined, `${tool} errored`);
+    assert.equal(body.disableRecording, true, `${tool}: disableRecording`);
+    assert.deepEqual(body.variables, { customerName: "Sam" }, `${tool}: variables`);
+    assert.equal(body.modelTier, "max", `${tool}: modelTier`);
+    assert.equal(body.callScreeningIdentity, "Acme", `${tool}: callScreeningIdentity`);
+    assert.equal(body.callScreeningPurpose, "reminder", `${tool}: callScreeningPurpose`);
+  }
+});
+
+test("call tools omit unset controls so backend defaults stand (#204)", async () => {
+  let body = "unset";
+  const h = harness(makeStub({ makeCall: async (a, n, g, f, v, opts) => { body = opts; return { id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }; } }));
+  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
+  // buildCallControls passes an object of all-undefined fields; applyCallControls
+  // forwards none of them.
+  for (const k of ["disableRecording", "variables", "modelTier", "callScreeningIdentity", "callScreeningPurpose"]) {
+    assert.equal(body[k], undefined, `unset ${k} must not be forwarded`);
+  }
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 29);
+  assert.equal(registered.size, 30);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });

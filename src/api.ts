@@ -24,6 +24,27 @@ type WebhookTestResult = {
   error?: string | null;
 };
 
+// Optional per-call controls accepted by POST /v1/calls (CreateOutboundCallRequest):
+// recording choice, dynamic variables, a model-tier override, and call-screening.
+export type CallControls = {
+  disableRecording?: boolean;
+  variables?: Record<string, string>;
+  modelTier?: string;
+  callScreeningIdentity?: string;
+  callScreeningPurpose?: string;
+};
+
+// Forward only the controls the caller actually set, so an omitted field leaves
+// the backend default untouched.
+function applyCallControls(body: Record<string, unknown>, opts?: CallControls): void {
+  if (!opts) return;
+  if (opts.disableRecording !== undefined) body.disableRecording = opts.disableRecording;
+  if (opts.variables !== undefined) body.variables = opts.variables;
+  if (opts.modelTier !== undefined) body.modelTier = opts.modelTier;
+  if (opts.callScreeningIdentity !== undefined) body.callScreeningIdentity = opts.callScreeningIdentity;
+  if (opts.callScreeningPurpose !== undefined) body.callScreeningPurpose = opts.callScreeningPurpose;
+}
+
 export class AgentPhoneAPI {
   private baseUrl: string;
   // A static key, or a getter resolved per request (used when the credential
@@ -556,11 +577,13 @@ export class AgentPhoneAPI {
     initialGreeting?: string,
     fromNumberId?: string,
     voice?: string,
+    opts?: CallControls,
   ) {
     const body: Record<string, unknown> = { agentId, toNumber };
     if (initialGreeting !== undefined) body.initialGreeting = initialGreeting;
     if (fromNumberId !== undefined) body.fromNumberId = fromNumberId;
     if (voice !== undefined) body.voice = voice;
+    applyCallControls(body, opts);
 
     return this.request<{
       id: string;
@@ -573,6 +596,17 @@ export class AgentPhoneAPI {
     }>("POST", "/v1/calls", body);
   }
 
+  // Ends an in-progress call. The backend treats ending an already-ended call as
+  // a no-op (idempotent in behavior), so retrying after a timeout is safe.
+  async endCall(callId: string) {
+    return this.request<{
+      id?: string;
+      status?: string;
+      endedAt?: string | null;
+      success?: boolean;
+    }>("POST", `/v1/calls/${encodeURIComponent(callId)}/end`);
+  }
+
   // Initiates the call and returns immediately with its ID and initial state.
   // The backend has no completion-wait, so get_call is used to retrieve the
   // transcript once the call has progressed.
@@ -582,12 +616,14 @@ export class AgentPhoneAPI {
     systemPrompt: string,
     initialGreeting?: string,
     fromNumberId?: string,
-    voice?: string
+    voice?: string,
+    opts?: CallControls,
   ) {
     const body: Record<string, unknown> = { agentId, toNumber, systemPrompt };
     if (initialGreeting !== undefined) body.initialGreeting = initialGreeting;
     if (fromNumberId !== undefined) body.fromNumberId = fromNumberId;
     if (voice !== undefined) body.voice = voice;
+    applyCallControls(body, opts);
 
     return this.request<{
       id: string;

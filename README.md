@@ -157,7 +157,7 @@ The optional anonymous mode instead uses the configured server API key.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
-## All Tools (29)
+## All Tools (30)
 
 ### Account
 
@@ -197,8 +197,9 @@ The optional anonymous mode instead uses the configured server API key.
 |------|-------------|
 | `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
 | `get_call` | Get call details and transcript |
-| `make_call` | Place an outbound call (webhook-driven) |
-| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed |
+| `end_call` | End an in-progress call (safe to retry; ending a finished call is a no-op) |
+| `make_call` | Place an outbound call (webhook-driven). Supports recording, variables, model tier, and call-screening controls |
+| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. Supports recording, variables, model tier, and call-screening controls |
 
 ### Agents
 

@@ -571,6 +571,58 @@ test("HTTP and stdio enforce webhook defaults and reaction validation through th
   }
 });
 
+test("tools/list is identical across HTTP and stdio transports (tasks#202)", async (t) => {
+  // One authoritative tool definition must drive both transports: same names,
+  // titles, behavior hints, and required inputs. (Previously stdio copied only
+  // the title and kept sparse inline hints.)
+  const snapshot = (tools) =>
+    Object.fromEntries(
+      tools.map((tool) => [
+        tool.name,
+        {
+          title: tool.title ?? null,
+          annotations: tool.annotations ?? {},
+          // Compare the whole input schema (properties, types, defaults), not just
+          // required; normalize only the required ordering, which carries no meaning.
+          inputSchema: { ...(tool.inputSchema ?? {}), required: [...(tool.inputSchema?.required ?? [])].sort() },
+        },
+      ])
+    );
+
+  const backend = await startFakeBackend(t);
+
+  const { child, origin } = await startHttpServer(t, { AGENTPHONE_BASE_URL: backend.url });
+  await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+  const httpClient = new Client({ name: "test-http", version: "0.0.0" });
+  t.after(() => httpClient.close());
+  await httpClient.connect(
+    new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), { requestInit: { headers: { Authorization: "Bearer caller-key" } } })
+  );
+  const httpTools = snapshot((await httpClient.listTools()).tools);
+
+  const stdioTransport = new StdioClientTransport({
+    command: process.execPath, args: ["dist/index.js", "--stdio"], cwd: process.cwd(),
+    env: { AGENTPHONE_API_KEY: "stdio-key", AGENTPHONE_BASE_URL: backend.url, MCP_USE_ANONYMIZED_TELEMETRY: "false" }, stderr: "pipe",
+  });
+  stdioTransport.stderr?.on("data", () => {});
+  const stdioClient = new Client({ name: "test-stdio", version: "0.0.0" });
+  t.after(() => stdioClient.close());
+  await stdioClient.connect(stdioTransport);
+  const stdioTools = snapshot((await stdioClient.listTools()).tools);
+
+  assert.deepEqual(stdioTools, httpTools, "stdio and HTTP must expose identical tool definitions");
+
+  // Spot-check the specific hints the audit corrected: overwriting updates and
+  // webhook replacement are destructive; test_webhook is not idempotent.
+  assert.equal(httpTools.update_agent.annotations.destructiveHint, true);
+  assert.equal(httpTools.set_webhook.annotations.destructiveHint, true);
+  assert.notEqual(httpTools.test_webhook.annotations.idempotentHint, true);
+  // attach/detach are each other's inverse, so they stay non-destructive — assert
+  // it explicitly (cross-transport equality alone wouldn't catch both flipping).
+  assert.equal(httpTools.attach_number.annotations.destructiveHint, false);
+  assert.equal(httpTools.detach_number.annotations.destructiveHint, false);
+});
+
 test("stdio rejects a whitespace-only API key before any backend call", async (t) => {
   const backend = await startFakeBackend(t);
   const transport = new StdioClientTransport({
