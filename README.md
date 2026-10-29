@@ -88,13 +88,17 @@ Once configured, just ask your AI agent things like:
 
 ## Transport & hosting
 
-The server is built on the [mcp-use](https://docs.mcp-use.com) server framework,
-which owns the HTTP layer: Streamable HTTP, the SSE stream, session management,
-and the OAuth discovery endpoints. `npm start` (or the Docker image) runs it as
-an HTTP server on `PORT` (default 3000), reachable at `/mcp`.
+The server ships two transports from one entry point (`node dist/index.js`):
+
+- **stdio** (default): bare `npm start` / `npx agentphone-mcp` runs the standard
+  MCP stdio transport for local clients, using `AGENTPHONE_API_KEY`.
+- **HTTP**: set `PORT` (or pass `--http`/`--port <n>`) to run the Streamable HTTP
+  server, reachable at `/mcp`. The HTTP layer is built on the
+  [mcp-use](https://docs.mcp-use.com) framework, which owns Streamable HTTP, the
+  SSE stream, session management, and the OAuth discovery endpoints.
 
 - **Hosted:** `https://mcp.agentphone.ai/mcp`
-- **Self-hosted:** `PORT=3000 npm start` → `http://localhost:3000/mcp`
+- **Self-hosted HTTP:** `PORT=3000 npm start` → `http://localhost:3000/mcp`
 
 ### Authentication
 
@@ -131,6 +135,17 @@ The optional anonymous mode instead uses the configured server API key.
 | `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
 | `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
 | `AGENTPHONE_MCP_PUBLIC_URL` | Public base URL this server is reached at, advertised in the `/.well-known/mcp.json` install manifest (e.g. `https://mcp.agentphone.ai`). If unset, it's derived from the request. |
+
+## Support matrix
+
+| Dimension | Supported |
+|-----------|-----------|
+| Transports | stdio (default) and Streamable HTTP (set `PORT` / `--http`) |
+| Tested runtime | Node `^20.19.0 \|\| >=22.12.0` (CI runs 20, 22, 24) |
+| Clients | Any MCP client — verified with Cursor, Claude Desktop, Claude Code, Windsurf (stdio); Streamable-HTTP clients and remote agent platforms (HTTP) |
+| Auth modes | stdio: `AGENTPHONE_API_KEY`. HTTP: per-request bearer, OAuth (Authorization Code + PKCE), or anonymous server-key fallback (`AGENTPHONE_ALLOW_ANONYMOUS=true`, OAuth off) |
+| Channels | SMS and iMessage (send/receive); voice calls (webhook-driven or built-in AI) |
+| Number types | US and Canada numbers |
 
 ## Highlights
 
@@ -231,7 +246,7 @@ cd agentphone-mcp
 npm install
 npm run dev     # Run with tsx (hot reload)
 npm run build   # Compile TypeScript
-npm start       # Run compiled JS (stdio)
+npm start       # Run compiled JS — stdio by default; set PORT (or pass --http) for the HTTP server
 ```
 
 ## How It Works

@@ -952,7 +952,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("A voice ID from list_voices. Defaults to 'Skylar - Friendly Guide' if omitted."),
+        .describe("A voice ID from list_voices (use that tool to get valid IDs). If omitted, the account's default voice is used."),
       model_tier: z
         .enum(["turbo", "balanced", "max", "realtime"])
         .optional()
@@ -967,7 +967,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voicemail_message: z
         .string()
         .optional()
-        .describe("Voicemail greeting text. When set, unanswered calls hear this message and can leave a voicemail."),
+        .describe("Message the agent leaves when an outbound call reaches the callee's voicemail. When set, the agent leaves this message instead of simply hanging up."),
       voice_speed: z
         .number().min(0.5).max(2)
         .optional()
@@ -1084,7 +1084,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voicemail_message: z
         .string()
         .optional()
-        .describe("Voicemail greeting text, or empty string to disable voicemail."),
+        .describe("Message the agent leaves when an outbound call reaches the callee's voicemail, or empty string to clear it."),
       voice_speed: z
         .number().min(0.5).max(2)
         .optional()

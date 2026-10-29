@@ -16,6 +16,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createRequire } from "node:module";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { installConciseValidation } from "./validation.js";
 import { z } from "zod";
@@ -24,7 +25,12 @@ import { registerTools, type ToolRegistrar } from "./tools.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 
 const NAME = "agentphone";
-const VERSION = "0.8.0";
+// Single source of truth for the version: read it from package.json so the
+// handshake, server card, and manifest can never drift from the published
+// package (dist/index.js sits one level below package.json).
+const { version: VERSION } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
 const BASE_URL = (process.env.AGENTPHONE_BASE_URL || "https://api.agentphone.ai").replace(/\/$/, "");
 
 // Server handshake metadata surfaced in the MCP initialize/discovery response
