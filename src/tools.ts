@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 31 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 32 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -786,6 +786,159 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       } catch (e) {
         return err(e);
       }
+    }
+  );
+
+  server.tool(
+    "check_readiness",
+    "Check whether a phone number is ready to send a message or place a call BEFORE you try, so you " +
+      "can fix predictable failures first. Verifies the number is active, assigned to an agent, and " +
+      "capable of the channel you intend, plus the account's A2P/10DLC registration (for US SMS). " +
+      "Optionally checks a recipient's reachability. Returns a ready flag with specific blockers, " +
+      "warnings, and next steps.\n\n" +
+      "Note: credit balance and concurrency limits are enforced by the server at send time and cannot " +
+      "be pre-checked here, so a ready result does not guarantee against an insufficient-credit or " +
+      "busy error.",
+    {
+      number_id: z
+        .string()
+        .describe("The number to check, from list_numbers."),
+      channel: z
+        .enum(["sms", "imessage", "whatsapp", "voice"])
+        .optional()
+        .describe("The action you intend, so readiness reflects the right capability. Omit for a general check (active + assigned)."),
+      to_number: z
+        .string()
+        .optional()
+        .describe("Optional recipient (E.164) to also check for reachability on the intended channel."),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ number_id, channel, to_number }) => {
+      if (to_number !== undefined) {
+        const toErr = validateE164(to_number);
+        if (toErr) return err(new Error(toErr));
+      }
+      let number;
+      try {
+        number = await api.getNumber(number_id);
+      } catch (e) {
+        return err(e); // 404 → err() points at list_numbers
+      }
+
+      // SMS readiness (outboundSms state + account A2P/10DLC) is relevant for every
+      // messaging path: an explicit SMS check, a general check, AND an iMessage
+      // check (iMessage falls back to SMS when the recipient can't receive it).
+      // WhatsApp and voice don't use SMS. A registration gap is only a HARD blocker
+      // for an explicit channel=sms intent (below); otherwise it's a warning.
+      // The contact-capabilities endpoint reports iMessage/SMS/RCS, so a recipient
+      // reachability check only makes sense for those messaging channels.
+      const messagingChannel = channel === "sms" || channel === "imessage" || channel === undefined;
+      const smsRelevant = messagingChannel;
+      const wantRecipient = to_number !== undefined && messagingChannel;
+
+      // Best-effort lookups: a failure degrades to a warning, not a failed check.
+      const [regResult, capResult] = await Promise.allSettled([
+        smsRelevant ? api.getRegisterStatus() : Promise.resolve(null),
+        wantRecipient ? api.getContactCapabilities(to_number!) : Promise.resolve(null),
+      ]);
+      const register = regResult.status === "fulfilled" ? regResult.value : null;
+      const registerFailed = smsRelevant && regResult.status === "rejected";
+      const recipient = capResult.status === "fulfilled" ? capResult.value : null;
+      const recipientFailed = wantRecipient && capResult.status === "rejected";
+
+      const blockers: string[] = [];
+      const warnings: string[] = [];
+      const nextSteps: string[] = [];
+
+      if (number.status !== "active") {
+        blockers.push(`The number is ${number.status}, not active.`);
+        nextSteps.push("Wait for the number to become active, or contact support.");
+      }
+      if (!number.agentId) {
+        blockers.push("The number is not assigned to an agent.");
+        nextSteps.push("Attach the number to an agent with attach_number before sending or calling.");
+      }
+      if (channel === "whatsapp" && !number.whatsappEnabled) {
+        blockers.push("WhatsApp is not enabled on this number.");
+        nextSteps.push("Send WhatsApp from a WhatsApp-enabled number, or enable it on this one.");
+      }
+      if (channel === "voice" && !number.inboundCallsEnabled) {
+        warnings.push("Inbound calls are disabled on this number (outbound calling is unaffected).");
+      }
+
+      if (smsRelevant) {
+        if (number.outboundSms === "registration_required") {
+          if (channel === "sms") {
+            blockers.push("Outbound SMS requires A2P 10DLC registration on this number.");
+          } else {
+            warnings.push("Outbound SMS on this number requires A2P 10DLC registration; a general send may use iMessage, but US SMS will fail.");
+          }
+          nextSteps.push("Register the brand/campaign for 10DLC (see /register) before sending US SMS.");
+        } else if (number.outboundSms === "activating") {
+          warnings.push("Outbound SMS is still activating on this number; US SMS may fail until it reports 'enabled'.");
+        }
+
+        // Account-level A2P compliance. Match the exact successful statuses so a
+        // negative status like "inactive" or "not_approved" still warns.
+        const COMPLIANT = new Set(["approved", "active", "registered", "verified", "completed"]);
+        if (register) {
+          if (!COMPLIANT.has(String(register.campaign_status).toLowerCase())) {
+            const detail = register.issue?.message || register.stage || register.campaign_status;
+            warnings.push(`A2P registration is not approved (${detail}). US SMS may fail until it is.`);
+            nextSteps.push("Complete A2P/10DLC registration (see /register).");
+          }
+        } else if (registerFailed) {
+          warnings.push("Could not read A2P registration status; US SMS compliance is unverified.");
+        }
+      }
+
+      // Recipient reachability (messaging channels only). send_message delivers over
+      // SMS/iMessage, so base reachability on those two — not RCS, which the tool
+      // can't send.
+      if (recipient) {
+        const c = recipient.capabilities ?? {};
+        if (channel === "imessage" && c.imessage === false) {
+          warnings.push(`${to_number} cannot receive iMessage; it would fall back to SMS.`);
+        }
+        if (c.sms === false && c.imessage !== true) {
+          warnings.push(`${to_number} does not appear reachable by SMS or iMessage.`);
+        }
+      } else if (recipientFailed) {
+        warnings.push(`Could not check reachability for ${to_number}.`);
+      }
+
+      const ready = blockers.length === 0;
+      const structured: Record<string, unknown> = {
+        numberId: number.id,
+        phoneNumber: number.phoneNumber,
+        ready,
+        status: number.status,
+        assigned: Boolean(number.agentId),
+        channels: {
+          outboundSms: number.outboundSms,
+          whatsapp: number.whatsappEnabled,
+          inboundCalls: number.inboundCallsEnabled,
+        },
+        compliance: register
+          ? { campaignStatus: register.campaign_status, stage: register.stage, issue: register.issue }
+          : null,
+        blockers,
+        warnings,
+        nextSteps,
+        notChecked: ["creditBalance", "concurrency"],
+      };
+      if (recipient) {
+        structured.recipient = { phoneNumber: recipient.phoneNumber, capabilities: recipient.capabilities };
+      }
+
+      const lines = [
+        `Readiness for ${number.phoneNumber} (${number.id})${channel ? ` — ${channel}` : ""}: ${ready ? "READY" : "NOT READY"}`,
+        blockers.length ? `\nBlockers:\n${blockers.map((b) => `  - ${b}`).join("\n")}` : null,
+        warnings.length ? `\nWarnings:\n${warnings.map((w) => `  - ${w}`).join("\n")}` : null,
+        nextSteps.length ? `\nNext steps:\n${nextSteps.map((s) => `  - ${s}`).join("\n")}` : null,
+        `\nNot pre-checkable (enforced at send): credit balance and concurrency limits.`,
+      ].filter(Boolean);
+      return ok(lines.join("\n"), structured);
     }
   );
 

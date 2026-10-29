@@ -136,6 +136,33 @@ export class AgentPhoneAPI {
     }>("GET", `/v1/numbers?limit=${limit}&offset=${offset}`);
   }
 
+  // Full detail for one number, including the per-channel readiness flags
+  // (status, assignment, outboundSms state, WhatsApp/inbound-call enablement).
+  async getNumber(numberId: string) {
+    return this.request<{
+      id: string;
+      phoneNumber: string;
+      country: string;
+      status: string;
+      type?: string | null;
+      agentId: string | null;
+      outboundSms: string; // "enabled" | "activating" | "registration_required"
+      inboundCallsEnabled: boolean;
+      whatsappEnabled: boolean;
+    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}`);
+  }
+
+  // A2P / 10DLC campaign (compliance) status for the account/sub-account.
+  async getRegisterStatus() {
+    return this.request<{
+      campaign_status: string;
+      message: string;
+      stage: string | null;
+      issue: { code?: string; message?: string; since?: string } | null;
+      sub_account_id: string | null;
+    }>("GET", "/v1/register/status");
+  }
+
   async buyNumber(country = "US", agentId?: string, areaCode?: string) {
     return this.request<{
       id: string;

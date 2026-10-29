@@ -39,6 +39,8 @@ function makeStub(overrides = {}) {
     sendMessage: async () => ({ id: "m1", status: "sent", channel: "sms", from_number: "+1415", to_number: "+1310", media_urls: [], reply_to_message_id: null, reply_parent_unresolved: null }),
     sendReaction: async () => ({ id: "r1", reaction_type: "love", message_id: "m1", channel: "imessage" }),
     getContactCapabilities: async () => ({ phoneNumber: "+14155550123", capabilities: { imessage: true, sms: true, rcs: false }, checkedAt: "t" }),
+    getNumber: async () => ({ id: "num_1", phoneNumber: "+14155550123", country: "US", status: "active", type: "local", agentId: "agt_1", outboundSms: "enabled", inboundCallsEnabled: true, whatsappEnabled: true }),
+    getRegisterStatus: async () => ({ campaign_status: "approved", message: "ok", stage: null, issue: null, sub_account_id: null }),
     listVoices: async () => ({ data: [voice] }),
     listAgents: async () => ({ data: [agent], total: 1 }),
     createAgent: async () => agent,
@@ -101,6 +103,7 @@ const ARGS = {
   buy_number: { confirm: true },
   send_message: { agent_id: "agt_1", to_number: "+14155550123", body: "hi" },
   check_capabilities: { phone_number: "+14155550123" },
+  check_readiness: { number_id: "num_1" },
   get_messages: { number_id: "num_1" },
   list_calls: {},
   get_call: { call_id: "call_1" },
@@ -505,9 +508,103 @@ test("check_capabilities returns per-channel flags (tasks#203)", async () => {
   assert.equal(called, false, "bad input must be rejected before any API call");
 });
 
+test("check_readiness reports ready and the documented blocker states (tasks#199)", async () => {
+  const baseNum = { id: "num_1", phoneNumber: "+14155550123", country: "US", status: "active", type: "local", agentId: "agt_1", outboundSms: "enabled", inboundCallsEnabled: true, whatsappEnabled: true };
+  const approved = { campaign_status: "approved", message: "ok", stage: null, issue: null, sub_account_id: null };
+
+  // Ready state.
+  let h = harness(makeStub({ getNumber: async () => baseNum, getRegisterStatus: async () => approved }));
+  let r = await h.call("check_readiness", { number_id: "num_1" });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.ready, true);
+  assert.equal(r.structuredContent.blockers.length, 0);
+  assert.match(r.content[0].text, /READY/);
+  assert.deepEqual(r.structuredContent.notChecked, ["creditBalance", "concurrency"]);
+  assert.ok(OUTPUT_SCHEMAS.check_readiness.safeParse(r.structuredContent).success);
+
+  // Unassigned -> blocker.
+  h = harness(makeStub({ getNumber: async () => ({ ...baseNum, agentId: null }), getRegisterStatus: async () => approved }));
+  r = await h.call("check_readiness", { number_id: "num_1" });
+  assert.equal(r.structuredContent.ready, false);
+  assert.match(r.content[0].text, /attach_number/);
+
+  // Inactive -> blocker.
+  h = harness(makeStub({ getNumber: async () => ({ ...baseNum, status: "pending" }), getRegisterStatus: async () => approved }));
+  r = await h.call("check_readiness", { number_id: "num_1" });
+  assert.equal(r.structuredContent.ready, false);
+  assert.match(r.content[0].text, /not active/);
+
+  // SMS registration_required -> blocker for sms.
+  h = harness(makeStub({ getNumber: async () => ({ ...baseNum, outboundSms: "registration_required" }), getRegisterStatus: async () => approved }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "sms" });
+  assert.equal(r.structuredContent.ready, false);
+  assert.match(r.content[0].text, /10DLC/);
+
+  // Channel mismatch: whatsapp not enabled -> blocker for whatsapp.
+  h = harness(makeStub({ getNumber: async () => ({ ...baseNum, whatsappEnabled: false }), getRegisterStatus: async () => approved }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "whatsapp" });
+  assert.equal(r.structuredContent.ready, false);
+  assert.match(r.content[0].text, /WhatsApp is not enabled/);
+
+  // Pending compliance -> warning (not a hard blocker), still ready if number ok.
+  h = harness(makeStub({ getNumber: async () => baseNum, getRegisterStatus: async () => ({ campaign_status: "pending", message: "", stage: "vetting", issue: { message: "awaiting vetting" }, sub_account_id: null }) }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "sms" });
+  assert.equal(r.structuredContent.ready, true);
+  assert.ok(r.structuredContent.warnings.some((w) => /A2P/.test(w)));
+
+  // Best-effort: register-status failure degrades to a warning, not an error.
+  h = harness(makeStub({ getNumber: async () => baseNum, getRegisterStatus: async () => { throw new ApiError(500, "GET", "/v1/register/status", "boom"); } }));
+  r = await h.call("check_readiness", { number_id: "num_1" });
+  assert.equal(r.isError, undefined);
+  assert.ok(r.structuredContent.warnings.some((w) => /unverified/.test(w)));
+
+  // Missing number surfaces as an error.
+  h = harness(makeStub({ getNumber: async () => { throw new ApiError(404, "GET", "/v1/numbers/x", "not found"); } }));
+  r = await h.call("check_readiness", { number_id: "x" });
+  assert.equal(r.isError, true);
+
+  // Recipient check: an unreachable recipient produces a warning.
+  h = harness(makeStub({
+    getNumber: async () => baseNum, getRegisterStatus: async () => approved,
+    getContactCapabilities: async () => ({ phoneNumber: "+14155550199", capabilities: { imessage: false, sms: false, rcs: false }, checkedAt: "t" }),
+  }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "sms", to_number: "+14155550199" });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.recipient.phoneNumber, "+14155550199");
+  assert.ok(r.structuredContent.warnings.some((w) => /not appear reachable/.test(w)));
+
+  // Recipient lookup failure degrades to a warning, not an error.
+  let capCalled = false;
+  h = harness(makeStub({
+    getNumber: async () => baseNum, getRegisterStatus: async () => approved,
+    getContactCapabilities: async () => { capCalled = true; throw new ApiError(500, "GET", "/v1/contacts/capabilities", "boom"); },
+  }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "sms", to_number: "+14155550199" });
+  assert.equal(r.isError, undefined);
+  assert.equal(capCalled, true);
+  assert.ok(r.structuredContent.warnings.some((w) => /Could not check reachability/.test(w)));
+
+  // Non-messaging channel (voice) does NOT call the messaging-capabilities endpoint.
+  capCalled = false;
+  h = harness(makeStub({
+    getNumber: async () => baseNum, getRegisterStatus: async () => approved,
+    getContactCapabilities: async () => { capCalled = true; return { phoneNumber: "x", capabilities: {}, checkedAt: "t" }; },
+  }));
+  r = await h.call("check_readiness", { number_id: "num_1", channel: "voice", to_number: "+14155550199" });
+  assert.equal(r.isError, undefined, "voice readiness should still succeed");
+  assert.equal(typeof r.structuredContent.ready, "boolean");
+  assert.equal(capCalled, false, "voice readiness must not query messaging capabilities");
+
+  // A general (no channel) check does NOT hard-block on SMS registration.
+  h = harness(makeStub({ getNumber: async () => ({ ...baseNum, outboundSms: "registration_required" }), getRegisterStatus: async () => approved }));
+  r = await h.call("check_readiness", { number_id: "num_1" });
+  assert.equal(r.structuredContent.ready, true, "general check must not hard-block on SMS 10DLC");
+  assert.ok(r.structuredContent.warnings.some((w) => /10DLC/.test(w)));
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 31);
+  assert.equal(registered.size, 32);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -731,8 +828,9 @@ const REQUIRED = {
   delete_webhook: ["success"],
   test_webhook: ["success", "httpStatus", "errorMessage"],
   check_capabilities: ["phoneNumber", "capabilities", "checkedAt"],
+  check_readiness: ["numberId", "ready", "channels", "compliance", "blockers", "warnings", "nextSteps", "notChecked"],
 };
-const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {}, phoneNumber: "+1", capabilities: {}, checkedAt: "t" };
+const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {}, phoneNumber: "+1", capabilities: {}, checkedAt: "t", numberId: "num_1", ready: true, blockers: [], warnings: [], nextSteps: [], channels: {}, compliance: null, notChecked: [] };
 
 test("every required output field is enforced (omitting any one fails)", () => {
   for (const [tool, fields] of Object.entries(REQUIRED)) {

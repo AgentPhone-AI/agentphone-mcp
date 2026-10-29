@@ -294,6 +294,46 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .passthrough()
     .describe("The messaging channels a phone number can receive."),
 
+  check_readiness: z
+    .object({
+      numberId: z.string().describe("The number that was checked."),
+      phoneNumber: z.string().optional().describe("The checked number in E.164."),
+      ready: z.boolean().describe("True when there are no blockers for the intended action."),
+      status: z.string().optional().describe("The number's provisioning status."),
+      assigned: z.boolean().optional().describe("Whether the number is attached to an agent."),
+      channels: z
+        .object({
+          outboundSms: z.string().optional().describe("Outbound SMS state: enabled, activating, or registration_required."),
+          whatsapp: z.boolean().optional().describe("Whether WhatsApp is enabled."),
+          inboundCalls: z.boolean().optional().describe("Whether inbound calls are enabled."),
+        })
+        .passthrough()
+        .describe("Per-channel capability of the number."),
+      compliance: z
+        .object({
+          campaignStatus: z.string().optional().describe("A2P/10DLC campaign status."),
+          stage: z.string().nullable().optional().describe("Registration stage, or null."),
+          issue: z.record(z.string(), z.unknown()).nullable().optional().describe("Current registration issue, or null."),
+        })
+        .passthrough()
+        .nullable()
+        .describe("Account A2P/10DLC registration status; null when SMS isn't relevant or it couldn't be read."),
+      recipient: z
+        .object({
+          phoneNumber: z.string().optional().describe("The recipient number that was checked."),
+          capabilities: z.record(z.string(), z.unknown()).optional().describe("The recipient's per-channel reachability (imessage/sms/rcs)."),
+        })
+        .passthrough()
+        .optional()
+        .describe("Recipient reachability, present only when to_number was supplied on a messaging channel."),
+      blockers: z.array(z.string()).describe("Hard issues that will cause the action to fail until fixed."),
+      warnings: z.array(z.string()).describe("Soft issues that may cause failures."),
+      nextSteps: z.array(z.string()).describe("Specific actions to resolve the blockers/warnings above."),
+      notChecked: z.array(z.string()).describe("Readiness dimensions enforced at send time and not pre-checkable here (credit, concurrency)."),
+    })
+    .passthrough()
+    .describe("Whether a number is ready to send/call, with blockers, warnings, and next steps."),
+
   get_messages: z
     .object({
       data: z.array(messageEntry).describe("Messages for the number, newest first."),
