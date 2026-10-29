@@ -31,17 +31,22 @@ let failed = false;
 const fail = (msg) => { console.error(`  ✗ ${msg}`); failed = true; };
 const pass = (msg) => console.log(`  ✓ ${msg}`);
 
+// Resolve the npm binary per platform (npm.cmd on Windows). No shell: with
+// execFileSync the args are passed through unparsed, so a tarball path with
+// spaces (common under a Windows user profile) stays intact.
+const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+
 try {
   console.log("Packing tarball (npm pack)...");
-  const packOut = execFileSync("npm", ["pack", "--pack-destination", workdir], { cwd: root, encoding: "utf8" });
+  const packOut = execFileSync(NPM, ["pack", "--pack-destination", workdir], { cwd: root, encoding: "utf8" });
   const tarball = packOut.trim().split("\n").pop().trim();
   const tarballPath = join(workdir, tarball);
   console.log(`  packed ${tarball}`);
 
   console.log("Installing into a clean directory...");
   // Keep stderr so a failed install reports npm's actual error, not just the
-  // command line. (shell:true lets this resolve npm on Windows too.)
-  const npm = (args) => execFileSync("npm", args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"], shell: process.platform === "win32" });
+  // command line.
+  const npm = (args) => execFileSync(NPM, args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"] });
   npm(["init", "-y"]);
   npm(["install", tarballPath]);
 
