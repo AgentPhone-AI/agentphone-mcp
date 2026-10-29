@@ -31,12 +31,21 @@ let failed = false;
 const fail = (m) => { console.error(`  ✗ ${m}`); failed = true; };
 const ok = (m) => console.log(`  ✓ ${m}`);
 
+// Overall deadline so a reachable-but-stalled deployment fails instead of
+// hanging npm run canary forever. Covers the handshake, tools/list and the
+// optional read-only call.
+const TIMEOUT_MS = Number(process.env.MCP_CANARY_TIMEOUT_MS || 20_000);
+let timer;
+const deadline = new Promise((_, reject) => {
+  timer = setTimeout(() => reject(new Error(`canary exceeded ${TIMEOUT_MS}ms deadline`)), TIMEOUT_MS);
+});
+
 const transport = new StreamableHTTPClientTransport(new URL(url), {
   requestInit: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
 });
 const client = new Client({ name: "agentphone-canary", version: "0.0.0" });
 
-try {
+async function run() {
   await client.connect(transport);
   ok(`connected to ${url}`);
 
@@ -63,9 +72,14 @@ try {
   } else {
     console.log("  (no MCP_CANARY_TOKEN — skipped the authenticated read-only call)");
   }
+}
+
+try {
+  await Promise.race([run(), deadline]);
 } catch (e) {
   fail(`canary threw: ${e?.message ?? e}`);
 } finally {
+  clearTimeout(timer);
   try { await client.close(); } catch {}
 }
 

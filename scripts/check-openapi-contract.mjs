@@ -16,7 +16,9 @@ const problems = [];
 const require$ = (cond, msg) => { if (!cond) problems.push(msg); };
 
 function paramNames(op) {
-  return new Set((op?.parameters ?? []).map((p) => p.name));
+  // Only query parameters — a same-named path/header parameter must not satisfy a
+  // query contract.
+  return new Set((op?.parameters ?? []).filter((p) => p.in === "query").map((p) => p.name));
 }
 function props(spec, schemaName) {
   return spec.components?.schemas?.[schemaName]?.properties ?? {};
@@ -38,34 +40,66 @@ if (!res.ok) {
 const spec = await res.json();
 const paths = spec.paths ?? {};
 
-// --- Cursor-paged message history (get_messages, get_conversation_messages) ---
-for (const p of ["/v1/numbers/{number_id}/messages", "/v1/conversations/{conversation_id}/messages"]) {
+// Resolve a response schema's properties, following one array item $ref so we can
+// assert on the element fields the client reads.
+function itemProps(spec, schemaName, arrayField = "data") {
+  const field = props(spec, schemaName)[arrayField];
+  const ref = field?.items?.$ref ?? "";
+  const itemName = ref.split("/").pop();
+  return itemName ? props(spec, itemName) : {};
+}
+
+// --- Cursor-paged number messages (get_messages) ---
+{
+  const p = "/v1/numbers/{number_id}/messages";
   const op = paths[p]?.get;
   require$(op, `missing GET ${p}`);
   if (op) {
     const names = paramNames(op);
-    for (const q of ["limit", "cursor", "before", "after"]) {
-      require$(names.has(q), `GET ${p} no longer accepts '${q}'`);
-    }
+    for (const q of ["limit", "cursor", "before", "after"]) require$(names.has(q), `GET ${p} no longer accepts query '${q}'`);
     const rs = responseSchemaName(op);
     const rp = rs ? props(spec, rs) : {};
+    require$("data" in rp, `${p} response (${rs}) missing data`);
     require$("hasMore" in rp, `${p} response (${rs}) missing hasMore`);
     require$("nextCursor" in rp, `${p} response (${rs}) missing nextCursor`);
+    // The message item fields get_messages renders / normalizes.
+    const item = rs ? itemProps(spec, rs) : {};
+    for (const f of ["id", "from_", "to", "body", "receivedAt"]) require$(f in item, `${p} message item missing ${f}`);
   }
 }
 
-// --- Sender field: MessageResponse exposes from_ (we normalize to `from`) ---
-require$("from_" in props(spec, "MessageResponse"), "MessageResponse no longer exposes from_ (sender normalization would break)");
+// --- Cursor-paged conversation messages (get_conversation_messages) ---
+{
+  const p = "/v1/conversations/{conversation_id}/messages";
+  const op = paths[p]?.get;
+  require$(op, `missing GET ${p}`);
+  if (op) {
+    const names = paramNames(op);
+    for (const q of ["limit", "cursor", "before", "after"]) require$(names.has(q), `GET ${p} no longer accepts query '${q}'`);
+    const rs = responseSchemaName(op);
+    const rp = rs ? props(spec, rs) : {};
+    require$("data" in rp && "hasMore" in rp && "nextCursor" in rp, `${p} response (${rs}) missing data/hasMore/nextCursor`);
+    const item = rs ? itemProps(spec, rs) : {};
+    for (const f of ["id", "body", "fromNumber", "toNumber", "direction", "receivedAt"]) require$(f in item, `${p} message item missing ${f}`);
+  }
+}
 
-// --- Call lifecycle: end endpoint + outbound controls ---
-require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_id}/end (end_call)");
-const createCall = paths["/v1/calls"]?.post;
-require$(createCall, "missing POST /v1/calls");
-if (createCall) {
-  const reqName = requestSchemaName(createCall);
-  const cp = reqName ? props(spec, reqName) : {};
-  for (const f of ["disableRecording", "variables", "modelTier", "callScreeningIdentity", "callScreeningPurpose"]) {
-    require$(f in cp, `CreateOutboundCallRequest (${reqName}) missing ${f}`);
+// --- Outbound call create: the request fields the client SENDS and response
+//     fields it READS (end_call / recording controls live with tasks#204). ---
+{
+  const createCall = paths["/v1/calls"]?.post;
+  require$(createCall, "missing POST /v1/calls");
+  if (createCall) {
+    const reqName = requestSchemaName(createCall);
+    const cp = reqName ? props(spec, reqName) : {};
+    // Request fields the client sends (makeCall and/or makeConversationCall).
+    for (const f of ["agentId", "toNumber", "initialGreeting", "fromNumberId", "voice", "systemPrompt"]) {
+      require$(f in cp, `CreateOutboundCallRequest (${reqName}) missing ${f} (sent by the client)`);
+    }
+    // NOTE: the spec does not document the POST /v1/calls success response shape
+    // (empty schema), so the call-create response fields can't be asserted here.
+    // The message endpoints below DO document their responses, which is where the
+    // client's most fragile serialization lives.
   }
 }
 

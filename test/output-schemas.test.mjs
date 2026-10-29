@@ -324,14 +324,23 @@ test("list_calls composes supported filters or rejects unsupported combinations 
 });
 
 test("call lifecycle serializes end to end: make_call then get_call (tasks#205)", async () => {
-  const h = harness(makeStub());
+  // Distinct created vs fetched IDs, and capture the id get_call is actually
+  // asked for, so the test proves the lifecycle is followed (not two unrelated
+  // fixture calls).
+  const madeId = "call_made_42";
+  let fetchedId;
+  const h = harness(makeStub({
+    makeCall: async () => ({ id: madeId, fromNumber: "+1415", toNumber: "+1310", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }),
+    getCall: async (id) => { fetchedId = id; return { ...call, id }; },
+  }));
   const made = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
   assert.equal(made.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(made.structuredContent).success, "make_call structured content");
-  const id = made.structuredContent.id;
-  assert.ok(id, "make_call returns an id to follow up on");
-  const got = await h.call("get_call", { call_id: id });
+  assert.equal(made.structuredContent.id, madeId);
+  const got = await h.call("get_call", { call_id: made.structuredContent.id });
   assert.equal(got.isError, undefined);
+  assert.equal(fetchedId, madeId, "get_call must be asked for the id make_call returned");
+  assert.equal(got.structuredContent.id, madeId);
   assert.ok(OUTPUT_SCHEMAS.get_call.safeParse(got.structuredContent).success, "get_call structured content");
 });
 
