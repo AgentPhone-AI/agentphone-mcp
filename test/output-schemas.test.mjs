@@ -467,6 +467,25 @@ test("send_message: new-group recipients, channel, and interactive rules (tasks#
   r = await h.call("send_message", { agent_id: "agt_1", recipients: ["+1", "  "], body: "x" });
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /empty/);
+
+  // A single-entry recipients list can't form a group.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: ["+14155550101"], body: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /at least 2/);
+
+  // channel=whatsapp cannot target an iMessage group id.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "grp_abc", channel: "whatsapp", body: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /group id/);
+
+  // A blank to_number alongside recipients must not forward both destinations.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "  ", recipients: ["+1", "+2"], body: "x" });
+  assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
+  assert.equal(body.toNumber, undefined, "blank to_number must be dropped");
+  assert.deepEqual(body.recipients, ["+1", "+2"]);
 });
 
 test("check_capabilities returns per-channel flags (tasks#203)", async () => {
@@ -478,10 +497,12 @@ test("check_capabilities returns per-channel flags (tasks#203)", async () => {
   assert.match(r.content[0].text, /iMessage: yes/);
   assert.match(r.content[0].text, /RCS: unknown/);
   assert.ok(OUTPUT_SCHEMAS.check_capabilities.safeParse(r.structuredContent).success);
-  // Rejects a non-E.164 number before calling the API.
-  const h2 = harness(makeStub({ getContactCapabilities: async () => { throw new Error("should not be called"); } }));
+  // Rejects a non-E.164 number before calling the API (and never calls it).
+  let called = false;
+  const h2 = harness(makeStub({ getContactCapabilities: async () => { called = true; return { phoneNumber: "x", capabilities: {}, checkedAt: "t" }; } }));
   const bad = await h2.call("check_capabilities", { phone_number: "4155550123" });
   assert.equal(bad.isError, true);
+  assert.equal(called, false, "bad input must be rejected before any API call");
 });
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {

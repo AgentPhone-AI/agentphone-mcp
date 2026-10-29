@@ -663,29 +663,39 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
 
       // Destination: exactly one of to_number (single/existing target) or
-      // recipients (create a new iMessage group).
+      // recipients (create a new iMessage group). Normalize a blank to_number to
+      // undefined so "" + recipients can't slip both destinations onto the wire.
+      const toNumber = to_number?.trim() ? to_number.trim() : undefined;
       const hasRecipients = Boolean(recipients?.length);
-      if (to_number && hasRecipients) {
+      if (toNumber && hasRecipients) {
         return err(new Error("Give either to_number or recipients, not both. Use to_number for a single recipient or existing group; use recipients to create a new group."));
       }
-      if (!to_number && !hasRecipients) {
+      if (!toNumber && !hasRecipients) {
         return err(new Error("Provide to_number (a recipient or existing group) or recipients (members of a new group) when sending a message."));
       }
       // Only enforce E.164 when to_number is clearly a phone number (leading +).
       // Short codes, group IDs (grp_...), emails, and other destination identifiers
       // are passed through for the server to normalize and route.
-      if (to_number?.startsWith("+")) {
-        const phoneErr = validateE164(to_number);
+      if (toNumber?.startsWith("+")) {
+        const phoneErr = validateE164(toNumber);
         if (phoneErr) return err(new Error(phoneErr));
       }
       if (from_number) {
         const fromErr = validateE164(from_number);
         if (fromErr) return err(new Error(fromErr));
       }
+      // WhatsApp cannot target an iMessage group id.
+      if (channel === "whatsapp" && toNumber?.startsWith("grp_")) {
+        return err(new Error("channel=whatsapp cannot target an iMessage group id (grp_...). Send WhatsApp to a single phone number."));
+      }
       if (hasRecipients) {
-        // Let the API own normalization/de-duplication (it accepts national,
-        // formatted, email and opaque identifiers, dedupes, then requires 2–32
-        // distinct). Only guard the raw upper bound the API itself enforces.
+        // Let the API own de-duplication (it accepts national, formatted, email and
+        // opaque identifiers, dedupes, then requires 2–32 distinct). Guard only the
+        // raw bounds that the API itself can't satisfy: fewer than 2 raw entries can
+        // never yield 2 distinct members, and more than 128 is rejected outright.
+        if (recipients!.length < 2) {
+          return err(new Error("recipients needs at least 2 entries (a group has 2–32 distinct members after de-duplication)."));
+        }
         if (recipients!.length > 128) {
           return err(new Error("recipients accepts at most 128 raw entries (the server de-duplicates them to 2–32 distinct members)."));
         }
@@ -716,7 +726,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       try {
         const result = await api.sendMessage({
           agentId: agent_id,
-          toNumber: to_number,
+          toNumber,
           recipients,
           channel,
           body,
