@@ -291,10 +291,9 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       data: z.array(callObject).describe("Calls on this page."),
       ...listMeta,
-      scope: z.string().optional().describe("The scope this page was drawn from: 'account', 'agent_id=...', or 'number_id=...'."),
+      scope: z.string().describe("The scope this page was drawn from: 'account', 'agent_id=...', or 'number_id=...'."),
       appliedFilters: z
         .record(z.string(), z.string())
-        .optional()
         .describe("The status/direction/search filters actually applied (empty object when scoped to an agent or number)."),
     })
     .passthrough()

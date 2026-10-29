@@ -504,7 +504,7 @@ test("alternate success branches still return schema-valid structured content", 
 const REQUIRED = {
   list_numbers: ["data"],
   get_messages: ["data"],
-  list_calls: ["data"],
+  list_calls: ["data", "scope", "appliedFilters"],
   list_agents: ["data"],
   list_voices: ["data"],
   list_conversations: ["data"],
@@ -526,7 +526,7 @@ const REQUIRED = {
   delete_webhook: ["success"],
   test_webhook: ["success", "httpStatus", "errorMessage"],
 };
-const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null };
+const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {} };
 
 test("every required output field is enforced (omitting any one fails)", () => {
   for (const [tool, fields] of Object.entries(REQUIRED)) {
