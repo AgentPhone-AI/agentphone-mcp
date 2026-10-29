@@ -325,6 +325,41 @@ test("list_calls composes supported filters or rejects unsupported combinations 
   assert.match(r.content[0].text, /not both/);
 });
 
+test("call lifecycle serializes end to end: make_call then get_call (tasks#205)", async () => {
+  // Distinct created vs fetched IDs, and capture the id get_call is actually
+  // asked for, so the test proves the lifecycle is followed (not two unrelated
+  // fixture calls).
+  const madeId = "call_made_42";
+  let fetchedId;
+  const h = harness(makeStub({
+    makeCall: async () => ({ id: madeId, fromNumber: "+1415", toNumber: "+1310", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }),
+    getCall: async (id) => { fetchedId = id; return { ...call, id }; },
+  }));
+  const made = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
+  assert.equal(made.isError, undefined);
+  assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(made.structuredContent).success, "make_call structured content");
+  assert.equal(made.structuredContent.id, madeId);
+  const got = await h.call("get_call", { call_id: made.structuredContent.id });
+  assert.equal(got.isError, undefined);
+  assert.equal(fetchedId, madeId, "get_call must be asked for the id make_call returned");
+  assert.equal(got.structuredContent.id, madeId);
+  assert.ok(OUTPUT_SCHEMAS.get_call.safeParse(got.structuredContent).success, "get_call structured content");
+});
+
+test("mutation success is tracked separately from serialization (tasks#205)", async () => {
+  // A mutation whose API call fails must be an isError result with NO structured
+  // content — a serialization-valid empty object must never be mistaken for a
+  // successful send.
+  const h = harness(makeStub({ sendMessage: async () => { throw new ApiError(500, "POST", "/v1/messages", "boom"); } }));
+  const r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  assert.equal(r.isError, true);
+  assert.equal(r.structuredContent, undefined, "failed mutation must not carry structuredContent");
+  // The success path, by contrast, carries schema-valid structured content.
+  const ok2 = await harness(makeStub()).call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  assert.equal(ok2.isError, undefined);
+  assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(ok2.structuredContent).success);
+});
+
 test("end_call ends a call and tolerates an already-ended call (#204)", async () => {
   const calls = [];
   const h = harness(makeStub({ endCall: async (id) => { calls.push(id); return { id, status: "completed", endedAt: "t", success: true }; } }));

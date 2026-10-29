@@ -250,7 +250,17 @@ npm install
 npm run dev     # Run with tsx (hot reload)
 npm run build   # Compile TypeScript
 npm start       # Run compiled JS — stdio by default; set PORT (or pass --http) for the HTTP server
+npm test        # Build + run the full test suite (both transports, output-schema contracts)
 ```
+
+### Release & deployment checks
+
+| Command | What it verifies |
+|---------|------------------|
+| `npm run check:release` | Version is identical across `package.json`, `server.json`, and the built handshake (run in `prepublishOnly`). |
+| `npm run smoke:pack` | Runs `npm pack`, installs the resulting tarball in a clean dir, and runs the 204 detach regression against that **packed tarball** (the same bytes `npm publish` would upload; run in `prepublishOnly`). |
+| `npm run check:contract` | Fetches the live OpenAPI and asserts the endpoints/fields the tools depend on still exist (message cursors + item fields, call filters, outbound-call request/response fields the client uses, the detach endpoint, and the `from_` sender field). Network-dependent, so it's not part of `npm test` — run before a release or as a non-blocking CI job. Override with `OPENAPI_URL`. |
+| `npm run canary` | Read-only post-deploy canary: connects to `MCP_CANARY_URL`, checks the handshake and tool surface, and (with `MCP_CANARY_TOKEN`) runs one read-only tool. No mutations; skips cleanly when `MCP_CANARY_URL` is unset. |
 
 ## How It Works
 
