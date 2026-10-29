@@ -25,12 +25,15 @@ const pkg = read("package.json");
 const expected = pkg.version;
 if (!expected) problems.push("package.json has no version");
 
-// server.json (optional, but if present it must agree).
+// server.json (optional, but if present it must agree). A missing file is fine;
+// a malformed or unreadable one is a real problem and must not be treated as
+// "absent" (that would silently skip the registry-version checks).
 let server;
 try {
   server = read("server.json");
-} catch {
-  server = null;
+} catch (error) {
+  if (error?.code === "ENOENT") server = null;
+  else problems.push(`server.json could not be read: ${error?.message ?? error}`);
 }
 if (server) {
   if (server.version !== expected) {
@@ -44,18 +47,25 @@ if (server) {
 }
 
 // Built handshake version: the string the server reports over MCP. It is derived
-// from package.json at runtime, so a mismatch here means dist/ is stale.
+// from package.json at runtime, so the build must (a) still derive it that way and
+// (b) not reintroduce a hardcoded version literal that could drift.
 let built;
 try {
   built = readFileSync(join(root, "dist/index.js"), "utf8");
 } catch {
   problems.push("dist/index.js not found — run `npm run build` before this check");
 }
-if (built) {
-  // VERSION is read from package.json at runtime; confirm the build still does so
-  // rather than hardcoding a literal that could drift.
+// Check with `!== undefined` so an empty dist/index.js (falsy, but present) still
+// fails rather than silently skipping provenance validation.
+if (built !== undefined) {
   if (!/createRequire\(import\.meta\.url\)\(["']\.\.\/package\.json["']\)/.test(built)) {
     problems.push("dist/index.js no longer derives VERSION from package.json (possible hardcoded version)");
+  }
+  // Guard against a reintroduced literal like `VERSION = "0.9.0"` that would
+  // bypass the single-source-of-truth derivation above.
+  const hardcoded = built.match(/\bVERSION\s*=\s*["'`]\d+\.\d+\.\d+[^"'`]*["'`]/);
+  if (hardcoded) {
+    problems.push(`dist/index.js assigns a hardcoded version (${hardcoded[0]}); VERSION must come from package.json`);
   }
 }
 

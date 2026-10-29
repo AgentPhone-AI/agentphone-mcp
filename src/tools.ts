@@ -1026,7 +1026,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       voice: z
         .string()
         .optional()
-        .describe("A voice ID from list_voices (use that tool to get valid IDs). If omitted, the account's default voice is used."),
+        .describe("A voice ID from list_voices (use that tool to get valid IDs). If omitted, the server applies its default voice."),
       model_tier: z
         .enum(["turbo", "balanced", "max", "realtime"])
         .optional()

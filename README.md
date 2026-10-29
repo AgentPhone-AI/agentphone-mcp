@@ -92,8 +92,9 @@ The server ships two transports from one entry point (`node dist/index.js`):
 
 - **stdio** (default): bare `npm start` / `npx agentphone-mcp` runs the standard
   MCP stdio transport for local clients, using `AGENTPHONE_API_KEY`.
-- **HTTP**: set `PORT` (or pass `--http`/`--port <n>`) to run the Streamable HTTP
-  server, reachable at `/mcp`. The HTTP layer is built on the
+- **HTTP**: set `PORT` (or pass `--http`, optionally with `--port <n>`) to run the
+  Streamable HTTP server, reachable at `/mcp`. `--port` alone does not switch
+  transports — `--http` or `PORT` selects HTTP. The HTTP layer is built on the
   [mcp-use](https://docs.mcp-use.com) framework, which owns Streamable HTTP, the
   SSE stream, session management, and the OAuth discovery endpoints.
 
