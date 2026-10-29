@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 30 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * 31 MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -520,15 +520,19 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
   server.tool(
     "send_message",
-    "Send an SMS or iMessage from one of your agent's phone numbers, or react to an existing " +
-      "message. The tool has two modes, so which inputs are required depends on the mode:\n" +
-      "- Send: give a recipient (to_number) and a sender (agent_id, from_number, or number_id), " +
-      "plus body and/or media. The agent must have a phone number attached; number_id or " +
-      "from_number picks which one when it has several.\n" +
+    "Send an SMS, iMessage, or WhatsApp message from one of your agent's phone numbers, or react to " +
+      "an existing message. The tool has two modes, so which inputs are required depends on the mode:\n" +
+      "- Send: give a destination and a sender (agent_id, from_number, or number_id), plus body " +
+      "and/or media. The destination is either to_number (a single recipient or existing group) or " +
+      "recipients (members of a NEW iMessage group) — exactly one. The agent must have a phone number " +
+      "attached; number_id or from_number picks which one when it has several.\n" +
       "- React: set reaction and react_to_message_id (iMessage only) to tapback or emoji-react to " +
-      "a message. Pass no send fields (recipient, sender, body/media, or send options); those are rejected.\n" +
-      "iMessage extras (ignored on SMS): reply_to_message_id threads a reply under an earlier " +
-      "message, and send_style adds an expressive screen/bubble effect.\n" +
+      "a message. Pass no send fields; those are rejected.\n" +
+      "Channel: omit channel to auto-pick SMS/iMessage; set channel=whatsapp to force WhatsApp, which " +
+      "also unlocks the interactive fields (buttons, list, cta, template — one per message, and a " +
+      "template is needed to start a new WhatsApp conversation).\n" +
+      "iMessage extras (ignored on SMS): reply_to_message_id threads a reply, and send_style adds an " +
+      "expressive effect.\n" +
       "Returns the sent message (id, status, channel, from/to numbers), or the applied reaction.",
     {
       agent_id: z
@@ -538,7 +542,15 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       to_number: z
         .string()
         .optional()
-        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an iMessage group chat. Required when sending a message (not needed for a reaction)."),
+        .describe("Recipient: a phone number in E.164 format (e.g. +14155551234), a US short code, or a group ID (grp_...) to post into an EXISTING iMessage group chat. Give either to_number or recipients, not both. Not needed for a reaction."),
+      recipients: z
+        .array(z.string())
+        .optional()
+        .describe("Create a NEW iMessage group and send to these members (phone numbers in any format, or other identifiers). Use instead of to_number. The server normalizes and de-duplicates them and requires 2–32 distinct members. Cannot be combined with channel=whatsapp."),
+      channel: z
+        .enum(["whatsapp"])
+        .optional()
+        .describe("Force delivery over WhatsApp. Omit to let the server pick SMS/iMessage automatically. Required to use the WhatsApp interactive fields (buttons, list, cta, template)."),
       body: z
         .string()
         .optional()
@@ -575,6 +587,22 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         ])
         .optional()
         .describe("An expressive screen or bubble effect played when the message arrives (iMessage only; ignored on SMS)."),
+      buttons: z
+        .array(z.string())
+        .optional()
+        .describe("WhatsApp only (channel=whatsapp). Up to a few quick-reply button labels shown under the message. Mutually exclusive with list, cta, and template."),
+      list: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("WhatsApp only (channel=whatsapp). An interactive list message object. Mutually exclusive with buttons, cta, and template."),
+      cta: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("WhatsApp only (channel=whatsapp). A call-to-action (e.g. URL button) object. Mutually exclusive with buttons, list, and template."),
+      template: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("WhatsApp only (channel=whatsapp). A pre-approved template message object, required to open a new WhatsApp conversation outside the 24h customer-service window. Mutually exclusive with buttons, list, and cta."),
       react_to_message_id: z
         .string()
         .optional()
@@ -585,7 +613,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .describe("iMessage only. Tapback or single emoji applied to react_to_message_id: one of love, like, dislike, laugh, emphasize, question, or a single emoji (e.g. '🔥'). When set, this reacts instead of sending a message."),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, react_to_message_id, reaction }) => {
+    async ({ agent_id, to_number, recipients, channel, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, buttons, list, cta, template, react_to_message_id, reaction }) => {
       // Reaction mode: react to an existing message instead of sending one.
       // A reaction and a message in the same call used to run the reaction and
       // drop the message without a word. Refuse the combination instead.
@@ -598,11 +626,17 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
         const conflicting = [
           to_number ? "to_number" : null,
+          recipients?.length ? "recipients" : null,
+          channel ? "channel" : null,
           body ? "body" : null,
           media_url ? "media_url" : null,
           media_urls?.length ? "media_urls" : null,
           reply_to_message_id ? "reply_to_message_id" : null,
           send_style ? "send_style" : null,
+          buttons?.length ? "buttons" : null,
+          list ? "list" : null,
+          cta ? "cta" : null,
+          template ? "template" : null,
           agent_id ? "agent_id" : null,
           number_id ? "number_id" : null,
           from_number ? "from_number" : null,
@@ -627,13 +661,20 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       if (!agent_id && !from_number && !number_id) {
         return err(new Error("Provide agent_id, from_number, or number_id to identify the sender."));
       }
-      if (!to_number) {
-        return err(new Error("to_number is required when sending a message."));
+
+      // Destination: exactly one of to_number (single/existing target) or
+      // recipients (create a new iMessage group).
+      const hasRecipients = Boolean(recipients?.length);
+      if (to_number && hasRecipients) {
+        return err(new Error("Give either to_number or recipients, not both. Use to_number for a single recipient or existing group; use recipients to create a new group."));
       }
-      // Only enforce E.164 when the recipient is clearly a phone number (leading +).
+      if (!to_number && !hasRecipients) {
+        return err(new Error("Provide to_number (a recipient or existing group) or recipients (members of a new group) when sending a message."));
+      }
+      // Only enforce E.164 when to_number is clearly a phone number (leading +).
       // Short codes, group IDs (grp_...), emails, and other destination identifiers
       // are passed through for the server to normalize and route.
-      if (to_number.startsWith("+")) {
+      if (to_number?.startsWith("+")) {
         const phoneErr = validateE164(to_number);
         if (phoneErr) return err(new Error(phoneErr));
       }
@@ -641,11 +682,43 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         const fromErr = validateE164(from_number);
         if (fromErr) return err(new Error(fromErr));
       }
+      if (hasRecipients) {
+        // Let the API own normalization/de-duplication (it accepts national,
+        // formatted, email and opaque identifiers, dedupes, then requires 2–32
+        // distinct). Only guard the raw upper bound the API itself enforces.
+        if (recipients!.length > 128) {
+          return err(new Error("recipients accepts at most 128 raw entries (the server de-duplicates them to 2–32 distinct members)."));
+        }
+        if (recipients!.some((r: string) => typeof r !== "string" || r.trim() === "")) {
+          return err(new Error("recipients must not contain empty values."));
+        }
+        // A new iMessage group and a forced WhatsApp channel are contradictory.
+        if (channel === "whatsapp") {
+          return err(new Error("recipients creates a new iMessage group and cannot be combined with channel=whatsapp. Send WhatsApp messages to a single to_number."));
+        }
+      }
+
+      // WhatsApp interactive content: requires channel=whatsapp, and at most one
+      // interactive shape per message.
+      const interactive = [
+        buttons?.length ? "buttons" : null,
+        list ? "list" : null,
+        cta ? "cta" : null,
+        template ? "template" : null,
+      ].filter((f): f is string => f !== null);
+      if (interactive.length > 1) {
+        return err(new Error(`Use only one of buttons, list, cta, or template per message (got ${interactive.join(", ")}).`));
+      }
+      if (interactive.length === 1 && channel !== "whatsapp") {
+        return err(new Error(`${interactive[0]} is a WhatsApp interactive field and requires channel=whatsapp.`));
+      }
 
       try {
         const result = await api.sendMessage({
           agentId: agent_id,
           toNumber: to_number,
+          recipients,
+          channel,
           body,
           mediaUrl: media_url,
           mediaUrls: media_urls,
@@ -653,6 +726,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           fromNumber: from_number,
           replyToMessageId: reply_to_message_id,
           sendStyle: send_style,
+          buttons,
+          list,
+          cta,
+          template,
         });
         const lines = [
           `Message sent!`,
@@ -666,6 +743,36 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           lines.push(`  Note: couldn't thread under the reply parent; delivered without threading.`);
         }
         return ok(lines.join("\n"), result);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "check_capabilities",
+    "Check which messaging channels a phone number can receive before you send: iMessage, SMS, and " +
+      "RCS. Use this to pick a channel or decide whether a number is reachable. Returns the per-channel " +
+      "flags and when they were last checked.",
+    {
+      phone_number: z
+        .string()
+        .describe("The phone number to check, in E.164 format (e.g. +14155551234)."),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ phone_number }) => {
+      const phoneErr = validateE164(phone_number);
+      if (phoneErr) return err(new Error(phoneErr));
+      try {
+        const result = await api.getContactCapabilities(phone_number);
+        const c = result.capabilities ?? {};
+        const yes = (v: unknown) => (v === true ? "yes" : v === false ? "no" : "unknown");
+        return ok(
+          `Capabilities for ${result.phoneNumber}:\n` +
+            `  iMessage: ${yes(c.imessage)}\n  SMS: ${yes(c.sms)}\n  RCS: ${yes(c.rcs)}\n` +
+            `  Checked: ${result.checkedAt}`,
+          result
+        );
       } catch (e) {
         return err(e);
       }

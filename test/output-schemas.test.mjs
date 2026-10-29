@@ -38,6 +38,7 @@ function makeStub(overrides = {}) {
     getMessages: async () => ({ data: [msg], hasMore: false }),
     sendMessage: async () => ({ id: "m1", status: "sent", channel: "sms", from_number: "+1415", to_number: "+1310", media_urls: [], reply_to_message_id: null, reply_parent_unresolved: null }),
     sendReaction: async () => ({ id: "r1", reaction_type: "love", message_id: "m1", channel: "imessage" }),
+    getContactCapabilities: async () => ({ phoneNumber: "+14155550123", capabilities: { imessage: true, sms: true, rcs: false }, checkedAt: "t" }),
     listVoices: async () => ({ data: [voice] }),
     listAgents: async () => ({ data: [agent], total: 1 }),
     createAgent: async () => agent,
@@ -99,6 +100,7 @@ const ARGS = {
   list_numbers: {},
   buy_number: { confirm: true },
   send_message: { agent_id: "agt_1", to_number: "+14155550123", body: "hi" },
+  check_capabilities: { phone_number: "+14155550123" },
   get_messages: { number_id: "num_1" },
   list_calls: {},
   get_call: { call_id: "call_1" },
@@ -409,9 +411,82 @@ test("call tools omit unset controls so backend defaults stand (#204)", async ()
   }
 });
 
+test("send_message: new-group recipients, channel, and interactive rules (tasks#203)", async () => {
+  // Capture what reaches the API.
+  let body;
+  const stub = { sendMessage: async (p) => { body = p; return { id: "m1", status: "sent", channel: p.channel ?? "imessage", from_number: "+1415", to_number: "+1310", media_urls: [], reply_to_message_id: null, reply_parent_unresolved: null }; } };
+
+  // Existing group / single recipient via to_number still works.
+  let h = harness(makeStub(stub));
+  let r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  assert.equal(r.isError, undefined);
+  assert.equal(body.toNumber, "+14155550123");
+
+  // New group via recipients, including the manav case: 32 duplicates + 1 distinct
+  // must be ACCEPTED here (the API dedupes); national/formatted numbers allowed.
+  h = harness(makeStub(stub));
+  const many = [...Array(32).fill("+14155550101"), "4155550102"];
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: many, body: "hey group" });
+  assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
+  assert.deepEqual(body.recipients, many, "recipients forwarded unchanged for the API to normalize");
+
+  // to_number + recipients together is rejected (exclusive destination).
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+1", recipients: ["+1", "+2"], body: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /not both/);
+
+  // recipients + channel=whatsapp is contradictory.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: ["+1", "+2"], channel: "whatsapp", body: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /whatsapp/i);
+
+  // WhatsApp interactive requires channel=whatsapp.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "x", buttons: ["Yes", "No"] });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /requires channel=whatsapp/);
+
+  // Interactive shapes are mutually exclusive.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "x", channel: "whatsapp", buttons: ["a"], template: { name: "t" } });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /only one of/);
+
+  // A valid WhatsApp template send forwards channel + template.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "", channel: "whatsapp", template: { name: "welcome" } });
+  assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
+  assert.equal(body.channel, "whatsapp");
+  assert.deepEqual(body.template, { name: "welcome" });
+  assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(r.structuredContent).success);
+
+  // Empty recipients value is rejected.
+  h = harness(makeStub(stub));
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: ["+1", "  "], body: "x" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /empty/);
+});
+
+test("check_capabilities returns per-channel flags (tasks#203)", async () => {
+  let asked;
+  const h = harness(makeStub({ getContactCapabilities: async (n) => { asked = n; return { phoneNumber: n, capabilities: { imessage: true, sms: true, rcs: null }, checkedAt: "t" }; } }));
+  const r = await h.call("check_capabilities", { phone_number: "+14155550123" });
+  assert.equal(r.isError, undefined);
+  assert.equal(asked, "+14155550123");
+  assert.match(r.content[0].text, /iMessage: yes/);
+  assert.match(r.content[0].text, /RCS: unknown/);
+  assert.ok(OUTPUT_SCHEMAS.check_capabilities.safeParse(r.structuredContent).success);
+  // Rejects a non-E.164 number before calling the API.
+  const h2 = harness(makeStub({ getContactCapabilities: async () => { throw new Error("should not be called"); } }));
+  const bad = await h2.call("check_capabilities", { phone_number: "4155550123" });
+  assert.equal(bad.isError, true);
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 30);
+  assert.equal(registered.size, 31);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -634,8 +709,9 @@ const REQUIRED = {
   detach_number: ["success"],
   delete_webhook: ["success"],
   test_webhook: ["success", "httpStatus", "errorMessage"],
+  check_capabilities: ["phoneNumber", "capabilities", "checkedAt"],
 };
-const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {} };
+const VAL = { id: "x", name: "x", agentId: "x", data: [], success: true, number: {}, httpStatus: null, errorMessage: null, statusCode: null, responseMs: null, error: null, scope: "account", appliedFilters: {}, phoneNumber: "+1", capabilities: {}, checkedAt: "t" };
 
 test("every required output field is enforced (omitting any one fails)", () => {
   for (const [tool, fields] of Object.entries(REQUIRED)) {

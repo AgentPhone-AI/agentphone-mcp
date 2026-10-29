@@ -192,7 +192,9 @@ export class AgentPhoneAPI {
 
   async sendMessage(params: {
     agentId?: string;
-    toNumber: string;
+    toNumber?: string;
+    recipients?: string[];
+    channel?: string;
     body: string;
     mediaUrl?: string;
     mediaUrls?: string[];
@@ -200,6 +202,10 @@ export class AgentPhoneAPI {
     fromNumber?: string;
     replyToMessageId?: string;
     sendStyle?: string;
+    buttons?: string[];
+    list?: Record<string, unknown>;
+    cta?: Record<string, unknown>;
+    template?: Record<string, unknown>;
   }) {
     return this.request<{
       id: string;
@@ -213,6 +219,10 @@ export class AgentPhoneAPI {
     }>("POST", "/v1/messages", {
       agent_id: params.agentId,
       to_number: params.toNumber,
+      // Empty arrays would otherwise reach the wire as a (rejected) destination;
+      // treat them as absent so to_number can send alone.
+      recipients: params.recipients?.length ? params.recipients : undefined,
+      channel: params.channel,
       body: params.body,
       media_url: params.mediaUrl,
       media_urls: params.mediaUrls,
@@ -220,7 +230,20 @@ export class AgentPhoneAPI {
       from_number: params.fromNumber,
       reply_to_message_id: params.replyToMessageId,
       send_style: params.sendStyle,
+      buttons: params.buttons?.length ? params.buttons : undefined,
+      list: params.list,
+      cta: params.cta,
+      template: params.template,
     });
+  }
+
+  // Which messaging channels a phone number can receive (imessage / sms / rcs).
+  async getContactCapabilities(phoneNumber: string) {
+    return this.request<{
+      phoneNumber: string;
+      capabilities: { imessage?: boolean | null; sms?: boolean | null; rcs?: boolean | null };
+      checkedAt: string;
+    }>("GET", `/v1/contacts/capabilities?phone_number=${encodeURIComponent(phoneNumber)}`);
   }
 
   async sendReaction(messageId: string, reaction: string) {

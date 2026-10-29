@@ -157,7 +157,7 @@ The optional anonymous mode instead uses the configured server API key.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
-## All Tools (30)
+## All Tools (31)
 
 ### Account
 
@@ -177,7 +177,8 @@ The optional anonymous mode instead uses the configured server API key.
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send SMS or iMessage. Supports media, threaded replies (`reply_to_message_id`), iMessage send effects (`send_style`), and group chats |
+| `send_message` | Send SMS, iMessage, or WhatsApp. Supports media, threaded replies (`reply_to_message_id`), iMessage effects (`send_style`), existing groups (`to_number`) or new groups (`recipients`), and WhatsApp interactive content (`channel=whatsapp` with `buttons`/`list`/`cta`/`template`) |
+| `check_capabilities` | Check which channels a phone number can receive (iMessage / SMS / RCS) before sending |
 | `get_messages` | Get messages for a specific number. Page older history with `cursor` (from `nextCursor`); `before`/`after` are optional time filters. |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with a bounded tail of recent messages |
