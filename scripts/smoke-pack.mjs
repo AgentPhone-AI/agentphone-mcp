@@ -18,7 +18,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname } from "node:path";
 import { createRequire } from "node:module";
 
@@ -31,6 +31,14 @@ let failed = false;
 const fail = (msg) => { console.error(`  ✗ ${msg}`); failed = true; };
 const pass = (msg) => console.log(`  ✓ ${msg}`);
 
+// This is a POSIX release/maintainer script: it runs in CI (ubuntu) and when a
+// maintainer publishes from macOS/Linux. It is intentionally not Windows-hardened
+// — invoking `npm` there hits a dead end either way (shell:true shell-parses the
+// tarball path, while spawning `npm.cmd` without a shell throws EINVAL on current
+// Node after CVE-2024-27980). Args are passed through execFileSync unparsed.
+const npm = (args, extra = {}) =>
+  execFileSync("npm", args, { cwd: workdir, stdio: ["ignore", "ignore", "inherit"], ...extra });
+
 try {
   console.log("Packing tarball (npm pack)...");
   const packOut = execFileSync("npm", ["pack", "--pack-destination", workdir], { cwd: root, encoding: "utf8" });
@@ -39,8 +47,10 @@ try {
   console.log(`  packed ${tarball}`);
 
   console.log("Installing into a clean directory...");
-  execFileSync("npm", ["init", "-y"], { cwd: workdir, stdio: "ignore" });
-  execFileSync("npm", ["install", tarballPath], { cwd: workdir, stdio: "ignore" });
+  // Keep stderr so a failed install reports npm's actual error, not just the
+  // command line.
+  npm(["init", "-y"]);
+  npm(["install", tarballPath]);
 
   const installed = join(workdir, "node_modules", "agentphone-mcp");
 
@@ -51,7 +61,8 @@ try {
   else fail(`installed version ${installedVersion} != package.json ${expectedVersion}`);
 
   // 204 detach regression, run against the INSTALLED dist (not src).
-  const { AgentPhoneAPI } = await import(join(installed, "dist", "api.js"));
+  // Import via a file URL so the absolute path resolves on Windows too.
+  const { AgentPhoneAPI } = await import(pathToFileURL(join(installed, "dist", "api.js")).href);
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(null, { status: 204 });
   try {
