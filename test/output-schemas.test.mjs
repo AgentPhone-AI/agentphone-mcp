@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { registerTools } from "../dist/tools.js";
 import { OUTPUT_SCHEMAS } from "../dist/output-schemas.js";
+import { ApiError } from "../dist/api.js";
 
 // Every tool declares an outputSchema, so the SDK validates each successful
 // result's structuredContent against it on every call. This drives the REAL
@@ -138,6 +139,22 @@ test("test_webhook uses the real success/httpStatus/errorMessage contract (#191)
   assert.ok(OUTPUT_SCHEMAS.test_webhook.safeParse(r.structuredContent).success);
 });
 
+test("timeouts: outcome-unknown for mutations, safe retry for reads (#198)", async () => {
+  // A mutation (POST) timeout must not advise a blind retry.
+  let h = harness(makeStub({ sendMessage: async () => { throw new ApiError(0, "POST", "/v1/messages", "Request timed out after 30000ms"); } }));
+  let r = await h.call("send_message", { agent_id: "a", to_number: "+14155550123", body: "hi" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /outcome is UNKNOWN/);
+  assert.match(r.content[0].text, /Do NOT blindly retry/);
+
+  // A read (GET) timeout is safe to retry.
+  h = harness(makeStub({ getCall: async () => { throw new ApiError(0, "GET", "/v1/calls/call_1", "Request timed out"); } }));
+  r = await h.call("get_call", { call_id: "call_1" });
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /retry, or pass a longer timeout/);
+  assert.doesNotMatch(r.content[0].text, /UNKNOWN/);
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
   assert.equal(registered.size, 28);
@@ -229,6 +246,32 @@ test("account_overview reports failed webhook lookup as omitted, not null", asyn
   assert.ok(OUTPUT_SCHEMAS.account_overview.safeParse(r.structuredContent).success);
   // A rejected lookup must not look like "no webhook configured" (null).
   assert.equal("webhook" in r.structuredContent && r.structuredContent.webhook === null, false);
+});
+
+test("list_voices tolerates null gender/accent and renders readable text (#190)", async () => {
+  const sparse = { voice_id: "v2", voice_name: "Nova", provider: "p", gender: null, accent: null, preview_audio_url: null };
+  const h = harness(makeStub({ listVoices: async () => ({ data: [voice, sparse] }) }));
+  const r = await h.call("list_voices", {});
+  assert.equal(r.isError, undefined, "list_voices should not error on null provider metadata");
+  assert.ok(OUTPUT_SCHEMAS.list_voices.safeParse(r.structuredContent).success, "schema accepts null gender/accent");
+  assert.doesNotMatch(r.content[0].text, /\bnull\b/, "no literal 'null' in display text");
+  assert.match(r.content[0].text, /Nova/);
+});
+
+test("account_overview errors when every section fails (#190)", async () => {
+  const boom = async () => { throw new Error("backend down"); };
+  const h = harness(makeStub({ listAgents: boom, listNumbers: boom, getWebhook: boom, getUsage: boom }));
+  const r = await h.call("account_overview", {});
+  assert.equal(r.isError, true, "all-failed overview must be an error, not an empty account");
+  assert.match(r.content[0].text, /every lookup errored/);
+});
+
+test("account_overview reports section status on partial failure (#190)", async () => {
+  const h = harness(makeStub({ getWebhook: async () => { throw new Error("denied"); } }));
+  const r = await h.call("account_overview", {});
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.sectionStatus.webhook, "failed");
+  assert.equal(r.structuredContent.sectionStatus.agents, "ok");
 });
 
 test("webhook tools mask the signing secret in structuredContent by default", async () => {
@@ -374,6 +417,11 @@ test("list_agents accepts documented numbers: null", async () => {
 
 test("create_agent accepts documented numbers: null", async () => {
   const r = await callAndValidate("create_agent", { name: "X" }, { createAgent: async () => AGENT_WITHOUT_NUMBERS });
+  assert.equal(r.structuredContent.numbers, null);
+});
+
+test("update_agent accepts documented numbers: null", async () => {
+  const r = await callAndValidate("update_agent", { agent_id: "agt_1" }, { updateAgent: async () => AGENT_WITHOUT_NUMBERS });
   assert.equal(r.structuredContent.numbers, null);
 });
 

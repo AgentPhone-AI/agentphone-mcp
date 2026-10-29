@@ -371,3 +371,26 @@ test("list_webhook_deliveries reads the documented agent response", async () => 
   assert.doesNotMatch(result.content[0].text, /Total:/);
   assert.equal(Object.hasOwn(result.structuredContent, "total"), false);
 });
+
+test("list_webhook_deliveries rejects an unsupported agent time filter before fetching", async () => {
+  const { seen, result } = await withDeliveryFetch([DELIVERY], () =>
+    harness(new AgentPhoneAPI("https://example.test", "key")).call("list_webhook_deliveries", {
+      agent_id: "agt_1", hours: 24,
+    })
+  );
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /hours.*project-level.*agent_id/i);
+  assert.deepEqual(seen, []);
+});
+
+test("list_webhook_deliveries preserves the supported project time filter", async () => {
+  const payload = { items: [], total: 0, offset: 0, limit: 7 };
+  const { seen, result } = await withDeliveryFetch(payload, () =>
+    harness(new AgentPhoneAPI("https://example.test", "key")).call("list_webhook_deliveries", {
+      hours: 24, limit: 7,
+    })
+  );
+  assert.equal(result.isError, undefined, result.content[0].text);
+  assert.deepEqual(seen, ["GET https://example.test/v1/webhooks/deliveries?limit=7&hours=24"]);
+  assert.deepEqual(result.structuredContent, { data: [], total: 0 });
+});

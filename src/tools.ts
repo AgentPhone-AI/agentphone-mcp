@@ -66,7 +66,16 @@ function err(error: unknown): ToolResult {
     let hint = "";
     switch (error.status) {
       case 0:
-        hint = " Request timed out — retry, or pass a longer timeout if the tool supports one.";
+        // A timeout on a non-GET is an ambiguous mutation: the server may or may
+        // not have applied it, so never advise a blind retry (it could duplicate
+        // a send, charge or create). Reads are safe to retry.
+        hint =
+          error.method !== "GET"
+            ? " The request timed out, so the outcome is UNKNOWN — the action may or may not have" +
+              " taken effect. Do NOT blindly retry, which could duplicate it. Check the current" +
+              " state first (e.g. the matching list_* or get_* tool), then retry only if it did" +
+              " not apply."
+            : " Request timed out — retry, or pass a longer timeout if the tool supports one.";
         break;
       case 401:
         hint = " The supplied credential was rejected. Check the bearer token (HTTP) or AGENTPHONE_API_KEY (stdio).";
@@ -169,10 +178,36 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           api.getUsage(),
         ]);
 
+        // When every section fails, don't return a success-looking empty
+        // overview — surface it as an error so it isn't mistaken for an empty
+        // account. (Partial failures are still reported inline below.)
+        if (results.every((r) => r.status === "rejected")) {
+          const reason = (results[0] as PromiseRejectedResult).reason;
+          // Preserve the original error so err() keeps its ApiError status hints
+          // (401 credential, 429 rate limit, timeout), rather than flattening it.
+          return reason instanceof ApiError
+            ? err(reason)
+            : err(
+                new Error(
+                  "Account overview failed: every lookup errored (agents, numbers, webhook, usage). " +
+                    (reason instanceof Error ? reason.message : String(reason))
+                )
+              );
+        }
+
         const agents = results[0].status === "fulfilled" ? results[0].value : null;
         const numbers = results[1].status === "fulfilled" ? results[1].value : null;
         const webhook = results[2].status === "fulfilled" ? results[2].value : null;
         const usage = results[3].status === "fulfilled" ? results[3].value : null;
+
+        // Per-section load status, so a partially-failed overview is explicit in
+        // structured output (not silently missing data).
+        const sectionStatus = {
+          agents: results[0].status === "fulfilled" ? "ok" : "failed",
+          numbers: results[1].status === "fulfilled" ? "ok" : "failed",
+          webhook: results[2].status === "fulfilled" ? "ok" : "failed",
+          usage: results[3].status === "fulfilled" ? "ok" : "failed",
+        };
 
         const sections: string[] = [];
 
@@ -250,6 +285,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         return ok(sections.join("\n"), {
+          sectionStatus,
           usage: usage?.numbers,
           agents: agents?.data,
           numbers: numbers?.data,
@@ -541,7 +577,7 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map((m) => `[${m.receivedAt}] ${m.from} → ${m.to}: ${m.body}`)
+          .map((m) => `[${m.receivedAt}] ${m.from ?? "unknown"} → ${m.to ?? "unknown"}: ${m.body}`)
           .join("\n");
 
         return ok(`${result.data.length} message(s):\n\n${formatted}`, result);
@@ -1211,10 +1247,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         }
 
         const formatted = result.data
-          .map(
-            (v) =>
-              `${v.voice_id} — ${v.voice_name} (${v.provider}, ${v.gender}, ${v.accent})`
-          )
+          .map((v) => {
+            // Providers may omit gender/accent (null); show only what's present.
+            const meta = [v.provider, v.gender, v.accent].filter(Boolean).join(", ");
+            return `${v.voice_id} — ${v.voice_name}${meta ? ` (${meta})` : ""}`;
+          })
           .join("\n");
 
         return ok(
@@ -1682,7 +1719,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "list_webhook_deliveries",
     "View recent webhook delivery history. Shows which events were delivered, HTTP status codes, and timing.\n\n" +
-      "Pass agent_id to see deliveries for that agent's webhook. Omit for project-level.",
+      "Pass agent_id to see deliveries for that agent's webhook. Omit for project-level. " +
+      "The hours time filter is supported only for project-level history.",
     {
       agent_id: z
         .string()
@@ -1695,13 +1733,16 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       hours: z
         .number()
         .optional()
-        .describe("Only include deliveries from the last N hours. If omitted, deliveries are returned regardless of age."),
+        .describe("Project-level history only: include deliveries from the last N hours. Cannot be combined with agent_id. If omitted, deliveries are returned regardless of age."),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ agent_id, limit, hours }) => {
+      if (agent_id && hours !== undefined) {
+        return err(new Error("hours is supported only for project-level webhook history. Omit agent_id to use hours, or omit hours to list recent deliveries for this agent."));
+      }
       try {
         const result = agent_id
-          ? await api.listAgentWebhookDeliveries(agent_id, limit, hours)
+          ? await api.listAgentWebhookDeliveries(agent_id, limit)
           : await api.listWebhookDeliveries(limit, hours);
 
         if (result.data.length === 0) {

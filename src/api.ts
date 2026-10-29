@@ -144,16 +144,25 @@ export class AgentPhoneAPI {
   // --- SMS / Messages ---
 
   async getMessages(numberId: string, limit = 50) {
-    return this.request<{
+    const res = await this.request<{
       data: Array<{
         id: string;
-        from: string;
+        from?: string | null;
+        // The deployed MessageResponse exposes the sender as `from_`.
+        from_?: string | null;
         to: string;
         body: string;
         receivedAt: string;
       }>;
       hasMore: boolean;
     }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?limit=${limit}`);
+    // Normalize the sender to `from` so the formatter and output schema have a
+    // single, explicit field (the API returns `from_`; keep `from` as a fallback
+    // for any older shape).
+    return {
+      ...res,
+      data: res.data.map(({ from_, ...m }) => ({ ...m, from: from_ ?? m.from ?? null })),
+    };
   }
 
   async sendMessage(params: {
@@ -242,7 +251,7 @@ export class AgentPhoneAPI {
           id: string;
           phoneNumber: string;
           status: string;
-        }>;
+        }> | null;
       }>;
       total: number;
     }>("GET", `/v1/agents?limit=${limit}&offset=${offset}`);
@@ -289,7 +298,7 @@ export class AgentPhoneAPI {
       voiceSpeed: number;
       language: string;
       createdAt: string;
-      numbers: Array<{ id: string; phoneNumber: string; status: string }>;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
     }>("POST", "/v1/agents", params);
   }
 
@@ -337,7 +346,7 @@ export class AgentPhoneAPI {
       voiceSpeed: number;
       language: string;
       createdAt: string;
-      numbers?: Array<{ id: string; phoneNumber: string; status: string }>;
+      numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
     }>("PATCH", `/v1/agents/${encodeURIComponent(agentId)}`, params);
   }
 
@@ -375,7 +384,7 @@ export class AgentPhoneAPI {
         id: string;
         phoneNumber: string;
         status: string;
-      }>;
+      }> | null;
     }>("GET", `/v1/agents/${encodeURIComponent(agentId)}`);
   }
 
@@ -426,7 +435,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
@@ -480,9 +489,8 @@ export class AgentPhoneAPI {
     );
   }
 
-  async listAgentWebhookDeliveries(agentId: string, limit = 20, hours?: number) {
-    let path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
-    if (hours !== undefined) path += `&hours=${hours}`;
+  async listAgentWebhookDeliveries(agentId: string, limit = 20) {
+    const path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
     const rows = await this.request<WebhookDelivery[]>("GET", path);
     return { data: rows };
   }
@@ -509,7 +517,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
@@ -633,7 +641,7 @@ export class AgentPhoneAPI {
         startedAt: string;
         endedAt: string | null;
         agentId: string | null;
-        phoneNumberId: string;
+        phoneNumberId: string | null;
       }>;
       hasMore: boolean;
       total: number;
