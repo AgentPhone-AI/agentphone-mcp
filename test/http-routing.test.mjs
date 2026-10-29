@@ -600,6 +600,8 @@ test("stdio caps total tool-input elements (tasks#193)", async (t) => {
   // call before our handler or any backend request.
   const r = await client.callTool({ name: "send_message", arguments: { agent_id: "a", recipients: Array(10_001).fill("+14155550101"), body: "hi" } });
   assert.equal(r.isError, true, "a call exceeding the element cap must error");
+  // Must be the SDK element cap (before schema/handler), not our 128-recipient check.
+  assert.match(r.content[0].text, /maximum of 10000 elements/);
   assert.deepEqual(backend.seen, [], "an over-limit call must never reach the backend");
 });
 
