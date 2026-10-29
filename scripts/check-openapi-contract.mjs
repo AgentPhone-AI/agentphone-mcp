@@ -92,8 +92,12 @@ function itemProps(spec, schemaName, arrayField = "data") {
   if (createCall) {
     const reqName = requestSchemaName(createCall);
     const cp = reqName ? props(spec, reqName) : {};
-    // Request fields the client sends (makeCall and/or makeConversationCall).
-    for (const f of ["agentId", "toNumber", "initialGreeting", "fromNumberId", "voice", "systemPrompt"]) {
+    // Request fields the client sends (makeCall and/or makeConversationCall),
+    // including the per-call controls added in tasks#204.
+    for (const f of [
+      "agentId", "toNumber", "initialGreeting", "fromNumberId", "voice", "systemPrompt",
+      "disableRecording", "variables", "modelTier", "callScreeningIdentity", "callScreeningPurpose",
+    ]) {
       require$(f in cp, `CreateOutboundCallRequest (${reqName}) missing ${f} (sent by the client)`);
     }
     // NOTE: the spec does not document the POST /v1/calls success response shape
@@ -102,6 +106,9 @@ function itemProps(spec, schemaName, arrayField = "data") {
     // client's most fragile serialization lives.
   }
 }
+
+// --- Call termination (end_call, tasks#204) ---
+require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_id}/end (end_call)");
 
 // --- Account-wide call filters (list_calls) ---
 {
