@@ -110,6 +110,17 @@ const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 const COUNTRY_REGEX = /^[A-Z]{2}$/;
 const AREA_CODE_REGEX = /^\d{3}$/;
 
+// Values from CreateAgentRequest.language and UpdateAgentRequest.language in the OpenAPI document.
+const LANGUAGE_CODES = [
+  "af-ZA", "ar-SA", "az-AZ", "bg-BG", "bs-BA", "ca-ES", "cs-CZ", "cy-GB", "da-DK", "de-DE",
+  "el-GR", "en-AU", "en-GB", "en-IN", "en-NZ", "en-US", "es-419", "es-ES", "fa-IR", "fi-FI",
+  "fil-PH", "fr-CA", "fr-FR", "gl-ES", "he-IL", "hi-IN", "hr-HR", "hu-HU", "hy-AM", "id-ID",
+  "is-IS", "it-IT", "ja-JP", "kk-KZ", "kn-IN", "ko-KR", "lt-LT", "lv-LV", "mk-MK", "mr-IN",
+  "ms-MY", "ne-NP", "nl-BE", "nl-NL", "no-NO", "pl-PL", "pt-BR", "pt-PT", "ro-RO", "ru-RU",
+  "sk-SK", "sl-SI", "sr-RS", "sv-SE", "sw-KE", "ta-IN", "th-TH", "tr-TR", "uk-UA", "ur-IN",
+  "vi-VN", "yue-CN", "zh-CN",
+] as const;
+
 function validateE164(phone: string): string | null {
   if (!E164_REGEX.test(phone))
     return "Phone number must be in E.164 format, e.g. +14155551234";
@@ -1149,9 +1160,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to use the server default (about 10 minutes)."),
       language: z
-        .string()
+        .enum(LANGUAGE_CODES)
         .optional()
-        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
+        .describe("BCP-47 locale for speech recognition and synthesis, one of the API's supported codes."),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
     async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
@@ -1266,9 +1277,9 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to keep the agent's current timeout."),
       language: z
-        .string()
+        .enum(LANGUAGE_CODES)
         .optional()
-        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
+        .describe("BCP-47 locale for speech recognition and synthesis, one of the API's supported codes."),
     },
     { idempotentHint: true },
     async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
