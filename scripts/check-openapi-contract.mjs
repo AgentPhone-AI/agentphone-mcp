@@ -1,168 +1,195 @@
 #!/usr/bin/env node
 /**
  * Compare the API surface this MCP server depends on against the live OpenAPI
- * (tasks#205). The unit suite drives handlers against stubs shaped like the API;
- * this closes the loop by asserting the real contract still matches — endpoints,
- * request fields and response fields the client reads — so a backend change that
- * breaks a tool is caught before release instead of in production.
+ * (tasks#205): endpoints, request fields, and consumed response fields/types.
  *
- * Network-dependent by design, so it is NOT part of `npm test`. Run it before a
- * release (`npm run check:contract`) or as a non-blocking CI job. Override the
- * spec URL with OPENAPI_URL.
+ * The CLI fetch is network-dependent: run `npm run check:contract` before a
+ * release or as a non-blocking CI job. Override the URL with OPENAPI_URL.
+ * The exported checker is pure; its fixture tests run offline in `npm test`.
  */
-const OPENAPI_URL = process.env.OPENAPI_URL || "https://api.agentphone.ai/openapi.json";
-
-const problems = [];
-const require$ = (cond, msg) => { if (!cond) problems.push(msg); };
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 function paramNames(op) {
-  // Only query parameters — a same-named path/header parameter must not satisfy a
-  // query contract.
+  // A same-named path/header parameter must not satisfy a query contract.
   return new Set((op?.parameters ?? []).filter((p) => p.in === "query").map((p) => p.name));
 }
-function props(spec, schemaName) {
-  return spec.components?.schemas?.[schemaName]?.properties ?? {};
-}
-function requestSchemaName(op) {
-  const ref = op?.requestBody?.content?.["application/json"]?.schema?.$ref ?? "";
-  return ref.split("/").pop() || null;
-}
-function responseSchemaName(op, code = "200") {
-  const ref = op?.responses?.[code]?.content?.["application/json"]?.schema?.$ref ?? "";
-  return ref.split("/").pop() || null;
+
+function responseSchema(op) {
+  return op?.responses?.["200"]?.content?.["application/json"]?.schema;
 }
 
-const res = await fetch(OPENAPI_URL, { headers: { Accept: "application/json" } });
-if (!res.ok) {
-  console.error(`Could not fetch OpenAPI from ${OPENAPI_URL}: HTTP ${res.status}`);
-  process.exit(2);
+// Only the schema forms used by the consumed responses are needed here: local
+// refs, anyOf (including null), and explicit types. This is not a full OpenAPI
+// validator. Unknown/unresolved shapes must fail instead of silently passing.
+function variants(spec, schema, seen = new Set()) {
+  if (!schema || typeof schema !== "object") return [{}];
+  let result;
+  if (schema.$ref) {
+    if (!schema.$ref.startsWith("#/") || seen.has(schema.$ref)) {
+      return [{ error: `unresolvable schema reference ${schema.$ref}` }];
+    }
+    const target = schema.$ref.slice(2).split("/").reduce(
+      (value, key) => value?.[key.replace(/~1/g, "/").replace(/~0/g, "~")], spec,
+    );
+    if (!target) return [{ error: `missing schema reference ${schema.$ref}` }];
+    result = variants(spec, target, new Set([...seen, schema.$ref]));
+  } else if (Array.isArray(schema.anyOf)) {
+    result = schema.anyOf.flatMap((branch) => variants(spec, branch, seen));
+    if (!result.length) result = [{}];
+  } else {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+    result = types.map((type) => ({ ...schema, type }));
+  }
+  // Also accept OpenAPI 3.0's spelling of a nullable type.
+  return schema.nullable === true ? [...result, { type: "null" }] : result;
 }
-const spec = await res.json();
-const paths = spec.paths ?? {};
 
-// Resolve a response schema's properties, following one array item $ref so we can
-// assert on the element fields the client reads.
-function itemProps(spec, schemaName, arrayField = "data") {
-  const field = props(spec, schemaName)[arrayField];
-  const ref = field?.items?.$ref ?? "";
-  const itemName = ref.split("/").pop();
-  return itemName ? props(spec, itemName) : {};
-}
-
-// --- Cursor-paged number messages (get_messages) ---
-{
-  const p = "/v1/numbers/{number_id}/messages";
-  const op = paths[p]?.get;
-  require$(op, `missing GET ${p}`);
-  if (op) {
-    const names = paramNames(op);
-    for (const q of ["limit", "cursor", "before", "after"]) require$(names.has(q), `GET ${p} no longer accepts query '${q}'`);
-    const rs = responseSchemaName(op);
-    const rp = rs ? props(spec, rs) : {};
-    require$("data" in rp, `${p} response (${rs}) missing data`);
-    require$("hasMore" in rp, `${p} response (${rs}) missing hasMore`);
-    require$("nextCursor" in rp, `${p} response (${rs}) missing nextCursor`);
-    // The message item fields get_messages renders / normalizes.
-    const item = rs ? itemProps(spec, rs) : {};
-    for (const f of ["id", "from_", "to", "body", "receivedAt"]) require$(f in item, `${p} message item missing ${f}`);
+function checkSchema(spec, schema, expected, path, problems) {
+  const types = Array.isArray(expected.type) ? expected.type : [expected.type];
+  for (const branch of variants(spec, schema)) {
+    if (branch.error) {
+      problems.push(`${path}: ${branch.error}`);
+    } else if (!types.includes(branch.type)) {
+      problems.push(`${path}: expected ${types.join(" | ")}, got ${branch.type ?? "an unspecified type"}`);
+    } else if (branch.type === "object") {
+      for (const [field, contract] of Object.entries(expected.properties ?? {})) {
+        if (!Object.hasOwn(branch.properties ?? {}, field)) {
+          problems.push(`${path} missing ${field}`);
+        } else {
+          checkSchema(spec, branch.properties[field], contract, `${path}.${field}`, problems);
+        }
+      }
+    } else if (branch.type === "array") {
+      checkSchema(spec, branch.items, expected.items, `${path}[]`, problems);
+    }
   }
 }
 
-// --- Cursor-paged conversation messages (get_conversation_messages) ---
-{
-  const p = "/v1/conversations/{conversation_id}/messages";
-  const op = paths[p]?.get;
-  require$(op, `missing GET ${p}`);
-  if (op) {
-    const names = paramNames(op);
-    for (const q of ["limit", "cursor", "before", "after"]) require$(names.has(q), `GET ${p} no longer accepts query '${q}'`);
-    const rs = responseSchemaName(op);
-    const rp = rs ? props(spec, rs) : {};
-    require$("data" in rp && "hasMore" in rp && "nextCursor" in rp, `${p} response (${rs}) missing data/hasMore/nextCursor`);
-    const item = rs ? itemProps(spec, rs) : {};
-    for (const f of ["id", "body", "fromNumber", "toNumber", "direction", "receivedAt"]) require$(f in item, `${p} message item missing ${f}`);
-  }
-}
+const string = { type: "string" };
+const boolean = { type: "boolean" };
+const nullableString = { type: ["string", "null"] };
+const nullableBoolean = { type: ["boolean", "null"] };
+const object = (properties) => ({ type: "object", properties });
+const messagePage = (properties) => object({
+  data: { type: "array", items: object(properties) },
+  hasMore: boolean,
+  nextCursor: nullableString,
+});
 
-// --- Outbound call create: the request fields the client SENDS and response
-//     fields it READS (end_call / recording controls live with tasks#204). ---
-{
+/** Return incompatibilities without fetching, logging, or changing the spec. */
+export function checkOpenApiContract(spec) {
+  const problems = [];
+  const require$ = (cond, msg) => { if (!cond) problems.push(msg); };
+  const paths = spec.paths ?? {};
+  const checkResponse = (op, path, contract) => {
+    if (op) checkSchema(spec, responseSchema(op), contract, `${path} response`, problems);
+  };
+
+  // These types mirror output-schemas.ts and api.ts's response normalization.
+  // Only consumed fields are pinned; additional fields/enums are harmless.
+  for (const [path, fields] of [
+    ["/v1/numbers/{number_id}/messages", {
+      id: string,
+      // api.getMessages maps from_ to the nullable `from` output field.
+      from_: nullableString,
+      to: nullableString,
+      body: string,
+      receivedAt: string,
+    }],
+    ["/v1/conversations/{conversation_id}/messages", {
+      id: string, body: string, fromNumber: string, toNumber: string,
+      direction: string, receivedAt: string,
+    }],
+  ]) {
+    const op = paths[path]?.get;
+    require$(op, `missing GET ${path}`);
+    if (op) {
+      const names = paramNames(op);
+      for (const q of ["limit", "cursor", "before", "after"]) {
+        require$(names.has(q), `GET ${path} no longer accepts query '${q}'`);
+      }
+      checkResponse(op, path, messagePage(fields));
+    }
+  }
+
+  // Outbound call request fields sent by makeCall/makeConversationCall.
   const createCall = paths["/v1/calls"]?.post;
   require$(createCall, "missing POST /v1/calls");
   if (createCall) {
-    const reqName = requestSchemaName(createCall);
-    const cp = reqName ? props(spec, reqName) : {};
-    // Request fields the client sends (makeCall and/or makeConversationCall),
-    // including the per-call controls added in tasks#204.
+    const reqRef = createCall.requestBody?.content?.["application/json"]?.schema?.$ref ?? "";
+    const reqName = reqRef.split("/").pop();
+    const cp = spec.components?.schemas?.[reqName]?.properties ?? {};
     for (const f of [
       "agentId", "toNumber", "initialGreeting", "fromNumberId", "voice", "systemPrompt",
       "disableRecording", "variables", "modelTier", "callScreeningIdentity", "callScreeningPurpose",
     ]) {
       require$(f in cp, `CreateOutboundCallRequest (${reqName}) missing ${f} (sent by the client)`);
     }
-    // NOTE: the spec does not document the POST /v1/calls success response shape
-    // (empty schema), so the call-create response fields can't be asserted here.
-    // The message endpoints below DO document their responses, which is where the
-    // client's most fragile serialization lives.
+    // The spec leaves the POST /v1/calls success schema empty. Do not infer or
+    // assert response fields that the API does not document.
   }
-}
 
-// --- Call termination (end_call, tasks#204) ---
-require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_id}/end (end_call)");
+  require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_id}/end (end_call)");
 
-// --- Account-wide call filters (list_calls) ---
-{
-  const op = paths["/v1/calls"]?.get;
-  require$(op, "missing GET /v1/calls");
-  if (op) {
-    const names = paramNames(op);
+  const listCalls = paths["/v1/calls"]?.get;
+  require$(listCalls, "missing GET /v1/calls");
+  if (listCalls) {
+    const names = paramNames(listCalls);
     for (const q of ["status", "direction", "search", "limit", "offset"]) {
       require$(names.has(q), `GET /v1/calls no longer accepts '${q}'`);
     }
   }
-}
 
-// --- Readiness response fields (check_readiness, tasks#199) ---
-{
-  require$(paths["/v1/numbers/{number_id}"]?.get, "missing GET /v1/numbers/{number_id} (check_readiness)");
-  const num = responseSchemaName(paths["/v1/numbers/{number_id}"]?.get);
-  const np = num ? props(spec, num) : {};
-  for (const f of ["id", "phoneNumber", "status", "agentId", "outboundSms", "whatsappEnabled", "inboundCallsEnabled"]) {
-    require$(f in np, `PhoneNumberResponse missing ${f} (read by check_readiness)`);
+  // Readiness responses: agentId may be null before assignment; flags and
+  // status strings are forwarded to non-nullable MCP output fields.
+  const numberPath = "/v1/numbers/{number_id}";
+  const number = paths[numberPath]?.get;
+  require$(number, `missing GET ${numberPath} (check_readiness)`);
+  checkResponse(number, numberPath, object({
+    id: string, phoneNumber: string, status: string, agentId: nullableString,
+    outboundSms: string, whatsappEnabled: boolean, inboundCallsEnabled: boolean,
+  }));
+
+  const registerPath = "/v1/register/status";
+  const register = paths[registerPath]?.get;
+  require$(register, `missing GET ${registerPath} (check_readiness)`);
+  checkResponse(register, registerPath, object({
+    campaign_status: string, stage: nullableString, issue: { type: ["object", "null"] },
+  }));
+
+  const capabilitiesPath = "/v1/contacts/capabilities";
+  const capabilities = paths[capabilitiesPath]?.get;
+  require$(capabilities, `missing GET ${capabilitiesPath} (check_capabilities)`);
+  if (capabilities) {
+    require$(paramNames(capabilities).has("phone_number"), `GET ${capabilitiesPath} no longer accepts query 'phone_number'`);
+    checkResponse(capabilities, capabilitiesPath, object({
+      phoneNumber: string,
+      capabilities: object({ imessage: nullableBoolean, sms: nullableBoolean, rcs: nullableBoolean }),
+      checkedAt: string,
+    }));
   }
-  require$(paths["/v1/register/status"]?.get, "missing GET /v1/register/status (check_readiness)");
-  const reg = responseSchemaName(paths["/v1/register/status"]?.get);
-  const rp = reg ? props(spec, reg) : {};
-  for (const f of ["campaign_status", "stage", "issue"]) {
-    require$(f in rp, `register/status response missing ${f} (read by check_readiness)`);
+
+  // detach_number tolerates both an empty 200 and a 204 response.
+  require$(paths["/v1/agents/{agent_id}/numbers/{number_id}"]?.delete,
+    "missing DELETE /v1/agents/{agent_id}/numbers/{number_id} (detach_number)");
+
+  return problems;
+}
+
+// Importing this module for offline tests must never fetch the live API.
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  const url = process.env.OPENAPI_URL || "https://api.agentphone.ai/openapi.json";
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    console.error(`Could not fetch OpenAPI from ${url}: HTTP ${res.status}`);
+    process.exit(2);
   }
-}
-
-// --- Contact capabilities (check_capabilities / check_readiness, tasks#203/#199) ---
-{
-  const op = paths["/v1/contacts/capabilities"]?.get;
-  require$(op, "missing GET /v1/contacts/capabilities (check_capabilities)");
-  if (op) {
-    require$(paramNames(op).has("phone_number"), "GET /v1/contacts/capabilities no longer accepts query 'phone_number'");
-    const cap = responseSchemaName(op);
-    const cp = cap ? props(spec, cap) : {};
-    for (const f of ["phoneNumber", "capabilities", "checkedAt"]) {
-      require$(f in cp, `capabilities response missing ${f} (read by check_capabilities/check_readiness)`);
-    }
+  const problems = checkOpenApiContract(await res.json());
+  if (problems.length) {
+    console.error(`OpenAPI contract check FAILED against ${url}:`);
+    for (const p of problems) console.error(`  - ${p}`);
+    process.exit(1);
   }
+  console.log(`OpenAPI contract OK: ${url} still matches the surface the MCP depends on.`);
 }
-
-// --- Detach endpoint exists (detach_number tolerates an empty 200/204 body) ---
-{
-  const del = paths["/v1/agents/{agent_id}/numbers/{number_id}"]?.delete;
-  require$(del, "missing DELETE /v1/agents/{agent_id}/numbers/{number_id} (detach_number)");
-  // The handler tolerates both a 204 and an empty 200, so we don't pin the exact
-  // code — only that the delete endpoint still exists.
-}
-
-if (problems.length) {
-  console.error(`OpenAPI contract check FAILED against ${OPENAPI_URL}:`);
-  for (const p of problems) console.error(`  - ${p}`);
-  process.exit(1);
-}
-console.log(`OpenAPI contract OK: ${OPENAPI_URL} still matches the surface the MCP depends on.`);
