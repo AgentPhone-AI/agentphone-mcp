@@ -602,6 +602,77 @@ test("check_readiness reports ready and the documented blocker states (tasks#199
   assert.ok(r.structuredContent.warnings.some((w) => /10DLC/.test(w)));
 });
 
+test("check_readiness applies outbound SMS states to the intended channel", async (t) => {
+  for (const outboundSms of ["activating", "enabled", "registration_required"]) {
+    for (const channel of ["sms", "imessage", undefined, "voice", "whatsapp"]) {
+      await t.test(`${outboundSms}, ${channel ?? "general"}`, async () => {
+        const base = makeStub();
+        let registrationCalls = 0;
+        const h = harness(makeStub({
+          getNumber: async () => ({ ...await base.getNumber(), outboundSms }),
+          getRegisterStatus: async () => { registrationCalls++; return base.getRegisterStatus(); },
+        }));
+        const r = await h.call("check_readiness", { number_id: "num_1", channel });
+        const smsRelevant = channel === "sms" || channel === "imessage" || channel === undefined;
+        const blocked = channel === "sms" && outboundSms !== "enabled";
+        const warned = smsRelevant && channel !== "sms" && outboundSms !== "enabled";
+        assert.equal(r.isError, undefined);
+        assert.equal(r.structuredContent.ready, !blocked);
+        assert.equal(r.structuredContent.channels.outboundSms, outboundSms);
+        assert.equal(r.structuredContent.blockers.length, blocked ? 1 : 0);
+        assert.equal(r.structuredContent.warnings.length, warned ? 1 : 0);
+        assert.equal(registrationCalls, smsRelevant ? 1 : 0);
+        assert.ok(OUTPUT_SCHEMAS.check_readiness.safeParse(r.structuredContent).success);
+        assert.match(r.content[0].text.split("\n")[0], blocked ? /: NOT READY$/ : /: READY$/);
+        if (smsRelevant && outboundSms === "activating") {
+          assert.match(r.content[0].text, /still activating/);
+          assert.ok(r.structuredContent.nextSteps.some((step) => /wait/i.test(step) && /check_readiness/.test(step) && /enabled/.test(step)));
+        } else if (!smsRelevant || outboundSms === "enabled") {
+          assert.deepEqual(r.structuredContent.nextSteps, []);
+          assert.doesNotMatch(r.content[0].text, /still activating/);
+        }
+      });
+    }
+  }
+});
+
+test("check_readiness becomes SMS-ready when activation completes", async () => {
+  const base = makeStub();
+  let outboundSms = "activating";
+  const h = harness(makeStub({ getNumber: async () => ({ ...await base.getNumber(), outboundSms }) }));
+  const activating = await h.call("check_readiness", { number_id: "num_1", channel: "sms" });
+  assert.equal(activating.structuredContent.ready, false);
+  assert.ok(activating.structuredContent.blockers.some((blocker) => /activating/.test(blocker)));
+
+  outboundSms = "enabled";
+  const enabled = await h.call("check_readiness", { number_id: "num_1", channel: "sms" });
+  assert.equal(enabled.structuredContent.ready, true);
+  assert.deepEqual(enabled.structuredContent.blockers, []);
+  assert.deepEqual(enabled.structuredContent.warnings, []);
+  assert.deepEqual(enabled.structuredContent.nextSteps, []);
+});
+
+test("check_readiness retains other blockers and lookup warnings during SMS activation", async () => {
+  const base = makeStub();
+  const h = harness(makeStub({
+    getNumber: async () => ({ ...await base.getNumber(), status: "pending", agentId: null, outboundSms: "activating" }),
+    getRegisterStatus: async () => { throw new Error("registration lookup unavailable"); },
+    getContactCapabilities: async () => { throw new Error("recipient lookup unavailable"); },
+  }));
+  const r = await h.call("check_readiness", { number_id: "num_1", channel: "sms", to_number: "+14155550199" });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.ready, false);
+  assert.equal(r.structuredContent.blockers.length, 3);
+  for (const reason of [/not active/, /not assigned/, /activating/]) {
+    assert.ok(r.structuredContent.blockers.some((blocker) => reason.test(blocker)), `${reason} blocker must be preserved`);
+  }
+  assert.ok(r.structuredContent.warnings.some((warning) => /unverified/.test(warning)));
+  assert.ok(r.structuredContent.warnings.some((warning) => /Could not check reachability/.test(warning)));
+  assert.ok(r.structuredContent.nextSteps.some((step) => /attach_number/.test(step)));
+  assert.ok(r.structuredContent.nextSteps.some((step) => /check_readiness/.test(step)));
+  assert.ok(OUTPUT_SCHEMAS.check_readiness.safeParse(r.structuredContent).success);
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
   assert.equal(registered.size, 32);

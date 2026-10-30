@@ -828,8 +828,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       // SMS readiness (outboundSms state + account A2P/10DLC) is relevant for every
       // messaging path: an explicit SMS check, a general check, AND an iMessage
       // check (iMessage falls back to SMS when the recipient can't receive it).
-      // WhatsApp and voice don't use SMS. A registration gap is only a HARD blocker
-      // for an explicit channel=sms intent (below); otherwise it's a warning.
+      // WhatsApp and voice don't use SMS. Registration or activation gaps are only
+      // HARD blockers for an explicit channel=sms intent; otherwise they warn.
       // The contact-capabilities endpoint reports iMessage/SMS/RCS, so a recipient
       // reachability check only makes sense for those messaging channels.
       const messagingChannel = channel === "sms" || channel === "imessage" || channel === undefined;
@@ -875,7 +875,13 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
           }
           nextSteps.push("Register the brand/campaign for 10DLC (see /register) before sending US SMS.");
         } else if (number.outboundSms === "activating") {
-          warnings.push("Outbound SMS is still activating on this number; US SMS may fail until it reports 'enabled'.");
+          const message = "Outbound SMS is still activating on this number; SMS sends will fail until it reports 'enabled'.";
+          if (channel === "sms") {
+            blockers.push(message);
+          } else {
+            warnings.push(message);
+          }
+          nextSteps.push("Wait and re-run check_readiness for this number until channels.outboundSms is 'enabled' before sending SMS.");
         }
 
         // Account-level A2P compliance. Match the exact successful statuses so a
