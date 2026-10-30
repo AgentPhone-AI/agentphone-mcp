@@ -190,7 +190,7 @@ test("timeouts: outcome-unknown for mutations, safe retry for reads (#198)", asy
   h = harness(makeStub({ getCall: async () => { throw new ApiError(0, "GET", "/v1/calls/call_1", "Request timed out"); } }));
   r = await h.call("get_call", { call_id: "call_1" });
   assert.equal(r.isError, true);
-  assert.match(r.content[0].text, /retry, or pass a longer timeout/);
+  assert.match(r.content[0].text, /safe to retry with bounded backoff/);
   assert.doesNotMatch(r.content[0].text, /UNKNOWN/);
 });
 

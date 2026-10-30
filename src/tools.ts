@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { AgentPhoneAPI, ApiError } from "./api.js";
+import { classifyRecovery } from "./recovery.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -62,43 +63,9 @@ function ok(text: string, structuredContent?: Record<string, unknown>): ToolResu
 
 function err(error: unknown): ToolResult {
   if (error instanceof ApiError) {
-    const base = error.detail;
-    let hint = "";
-    switch (error.status) {
-      case 0:
-        // A timeout on a non-GET is an ambiguous mutation: the server may or may
-        // not have applied it, so never advise a blind retry (it could duplicate
-        // a send, charge or create). Reads are safe to retry.
-        hint =
-          error.method !== "GET"
-            ? " The request timed out, so the outcome is UNKNOWN — the action may or may not have" +
-              " taken effect. Do NOT blindly retry, which could duplicate it. Check the current" +
-              " state first (e.g. the matching list_* or get_* tool), then retry only if it did" +
-              " not apply."
-            : " Request timed out — retry, or pass a longer timeout if the tool supports one.";
-        break;
-      case 401:
-        hint = " The supplied credential was rejected. Check the bearer token (HTTP) or AGENTPHONE_API_KEY (stdio).";
-        break;
-      case 404:
-        if (error.path.includes("/agents/"))
-          hint = " Use list_agents to see valid agent IDs.";
-        else if (error.path.includes("/numbers/"))
-          hint = " Use list_numbers to see valid number IDs.";
-        else if (error.path.includes("/calls/"))
-          hint = " Use list_calls to see recent call IDs.";
-        else if (error.path.includes("/conversations/"))
-          hint = " Use list_conversations to see valid conversation IDs.";
-        else if (error.path.includes("/webhook"))
-          hint = " Use get_webhook to check whether a webhook is configured.";
-        break;
-      case 429:
-        hint = error.retryAfter
-          ? ` Rate limited — wait ${error.retryAfter} (per Retry-After) before trying again.`
-          : " Rate limited — wait a moment and try again.";
-        break;
-    }
-    return { content: [{ type: "text", text: base + hint }], isError: true };
+    const { hint } = classifyRecovery(error);
+    const request = error.requestId ? ` Request ID: ${error.requestId}.` : "";
+    return { content: [{ type: "text", text: error.detail + hint + request }], isError: true };
   }
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };

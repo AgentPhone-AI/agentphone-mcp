@@ -68,42 +68,74 @@ export class AgentPhoneAPI {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
+    // Serialize before the I/O boundary: a local coding error is not a network
+    // failure and must not acquire transport recovery advice.
+    const payload = body ? JSON.stringify(body) : undefined;
 
     const timeout = timeoutMs ?? 30_000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
+      let res: Response;
+      let text: string;
+      try {
+        res = await fetch(url, {
+          method,
+          headers,
+          body: payload,
+          signal: controller.signal,
+        });
+        text = await res.text();
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") {
+          throw new ApiError(0, method, path, `Request timed out after ${timeout}ms`, null, { kind: "timeout" });
+        }
+        // fetch and response-body connection failures reject with TypeError.
+        // Do not include the exception's message/cause, which can contain URLs
+        // or credentials; preserve the operation in the typed error instead.
+        if (e instanceof TypeError) {
+          throw new ApiError(0, method, path, "Network request failed before the response could be read", null, { kind: "transport" });
+        }
+        throw e;
+      }
 
       if (!res.ok) {
-        const text = await res.text();
         let detail = text;
+        let metadata: ApiErrorMetadata = {};
         try {
-          detail = formatApiErrorDetail(JSON.parse(text)) ?? text;
+          const json: unknown = JSON.parse(text);
+          detail = formatApiErrorDetail(json) ?? text;
+          if (isRecord(json)) {
+            metadata = {
+              code: safeErrorIdentifier(isRecord(json.error) ? json.error.code : undefined, token),
+              requestId: safeErrorIdentifier(json.request_id, token),
+            };
+          }
         } catch {
           // non-JSON body: keep the raw text
         }
-        detail = redactSecrets(detail) || `HTTP ${res.status}`;
+        metadata.requestId ??= safeErrorIdentifier(res.headers.get("x-request-id"), token);
+        detail = redactSecrets(detail, token) || `HTTP ${res.status}`;
         const retryAfter = res.headers.get("retry-after");
-        throw new ApiError(res.status, method, path, detail, retryAfter);
+        throw new ApiError(res.status, method, path, detail,
+          retryAfter ? redactSecrets(retryAfter, token).slice(0, 128) : null, metadata);
       }
 
       // Treat any empty body as {} — not just 204. A 200 with no content (which
       // some DELETE endpoints return) would otherwise throw from res.json().
-      const text = await res.text();
       if (!text) return {} as T;
-      return JSON.parse(text) as T;
-    } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") {
-        throw new ApiError(0, method, path, `Request timed out after ${timeout}ms`);
+      try {
+        return JSON.parse(text) as T;
+      } catch (e) {
+        if (!(e instanceof SyntaxError)) throw e;
+        // A successful HTTP response can follow an executed write even when its
+        // JSON is unreadable. Do not expose parse errors or response fragments.
+        throw new ApiError(res.status, method, path, "The server returned an invalid JSON response", null, {
+          kind: "invalid-response",
+          requestId: safeErrorIdentifier(res.headers.get("x-request-id"), token),
+        });
       }
-      throw e;
     } finally {
       clearTimeout(timer);
     }
@@ -956,7 +988,17 @@ export class AgentPhoneAPI {
 
 // --- Error class ---
 
+type ApiErrorMetadata = {
+  kind?: "http" | "timeout" | "transport" | "invalid-response";
+  code?: string | null;
+  requestId?: string | null;
+};
+
 export class ApiError extends Error {
+  public readonly kind: "http" | "timeout" | "transport" | "invalid-response";
+  public readonly code: string | null;
+  public readonly requestId: string | null;
+
   constructor(
     public readonly status: number,
     public readonly method: string,
@@ -964,17 +1006,32 @@ export class ApiError extends Error {
     public readonly detail: string,
     // The server's Retry-After header (seconds or HTTP date), when present —
     // surfaced on 429 so callers back off for the advised time (see err()).
-    public readonly retryAfter: string | null = null
+    public readonly retryAfter: string | null = null,
+    metadata: ApiErrorMetadata = {}
   ) {
     super(`AgentPhone API ${method} ${path} failed (${status}): ${detail}`);
     this.name = "ApiError";
+    this.kind = metadata.kind ?? (status === 0 ? "timeout" : "http");
+    this.code = safeErrorIdentifier(metadata.code);
+    this.requestId = safeErrorIdentifier(metadata.requestId);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+// Metadata is diagnostic, not arbitrary response content. Reject oversized,
+// malformed, or credential-shaped values instead of reflecting them in tools.
+function safeErrorIdentifier(value: unknown, token?: string): string | null {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) return null;
+  return redactSecrets(value, token) === value ? value : null;
 }
 
 // Strip anything that looks like a credential from error text before it reaches
 // a tool result (which is logged and enters model context).
-function redactSecrets(text: string): string {
-  return text
+function redactSecrets(text: string, token?: string): string {
+  return (token ? text.split(token).join("***") : text)
     .replace(/\b(sk|rk)_[A-Za-z0-9_-]{6,}/g, "$1_***")
     // RFC 6750 bearer tokens allow A-Z a-z 0-9 - . _ ~ + / =, so match the full
     // set (not just word chars) or a token with these could be partly exposed.
@@ -982,7 +1039,7 @@ function redactSecrets(text: string): string {
 }
 
 // Turn the backend's error envelope into one actionable line. Handles the
-// structured { detail, error: { code, details } } shape, FastAPI validation
+// structured { detail, error: { message, code, details } } shape, FastAPI validation
 // arrays ([{ loc, msg }]), and plain { detail } / { message } strings — rather
 // than stringifying an object into "[object Object]" or dropping field details.
 function formatApiErrorDetail(json: unknown): string | undefined {
@@ -998,11 +1055,13 @@ function formatApiErrorDetail(json: unknown): string | undefined {
     return field ? `${field}: ${msg}` : String(msg);
   };
 
-  // Structured envelope: { detail, error: { code, details } }
+  // Structured envelope: { detail, error: { message, code, details } }
   const structured = j.error;
   if (structured && typeof structured === "object") {
     const parts: string[] = [];
-    const base = typeof j.detail === "string" ? j.detail : undefined;
+    const base = typeof structured.message === "string" && structured.message
+      ? structured.message
+      : typeof j.detail === "string" ? j.detail : undefined;
     if (base) parts.push(structured.code ? `${base} (${structured.code})` : base);
     else if (structured.code) parts.push(String(structured.code));
     const details = structured.details;
