@@ -101,15 +101,15 @@ const ARGS = {
   account_overview: {},
   list_numbers: {},
   buy_number: { confirm: true },
-  send_message: { agent_id: "agt_1", to_number: "+14155550123", body: "hi" },
+  send_message: { agent_id: "agt_1", to_number: "+14155550123", body: "hi", confirm: true },
   check_capabilities: { phone_number: "+14155550123" },
   check_readiness: { number_id: "num_1" },
   get_messages: { number_id: "num_1" },
   list_calls: {},
   get_call: { call_id: "call_1" },
   end_call: { call_id: "call_1" },
-  make_call: { agent_id: "agt_1", to_number: "+14155550123" },
-  make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x" },
+  make_call: { agent_id: "agt_1", to_number: "+14155550123", confirm: true },
+  make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x", confirm: true },
   list_agents: {},
   create_agent: { name: "X" },
   update_agent: { agent_id: "agt_1" },
@@ -181,7 +181,7 @@ test("test_webhook uses the real success/httpStatus/errorMessage contract (#191)
 test("timeouts: outcome-unknown for mutations, safe retry for reads (#198)", async () => {
   // A mutation (POST) timeout must not advise a blind retry.
   let h = harness(makeStub({ sendMessage: async () => { throw new ApiError(0, "POST", "/v1/messages", "Request timed out after 30000ms"); } }));
-  let r = await h.call("send_message", { agent_id: "a", to_number: "+14155550123", body: "hi" });
+  let r = await h.call("send_message", { agent_id: "a", to_number: "+14155550123", body: "hi", confirm: true });
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /outcome is UNKNOWN/);
   assert.match(r.content[0].text, /Do NOT blindly retry/);
@@ -340,7 +340,7 @@ test("call lifecycle serializes end to end: make_call then get_call (tasks#205)"
     makeCall: async () => ({ id: madeId, fromNumber: "+1415", toNumber: "+1310", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }),
     getCall: async (id) => { fetchedId = id; return { ...call, id }; },
   }));
-  const made = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
+  const made = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", confirm: true });
   assert.equal(made.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(made.structuredContent).success, "make_call structured content");
   assert.equal(made.structuredContent.id, madeId);
@@ -356,11 +356,11 @@ test("mutation success is tracked separately from serialization (tasks#205)", as
   // content — a serialization-valid empty object must never be mistaken for a
   // successful send.
   const h = harness(makeStub({ sendMessage: async () => { throw new ApiError(500, "POST", "/v1/messages", "boom"); } }));
-  const r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  const r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi", confirm: true });
   assert.equal(r.isError, true);
   assert.equal(r.structuredContent, undefined, "failed mutation must not carry structuredContent");
   // The success path, by contrast, carries schema-valid structured content.
-  const ok2 = await harness(makeStub()).call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  const ok2 = await harness(makeStub()).call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi", confirm: true });
   assert.equal(ok2.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(ok2.structuredContent).success);
 });
@@ -391,6 +391,7 @@ test("call tools forward recording/variables/model-tier/screening controls (#204
       agent_id: "agt_1", to_number: "+14155550123",
       disable_recording: true, variables: { customerName: "Sam" }, model_tier: "max",
       call_screening_identity: "Acme", call_screening_purpose: "reminder",
+      confirm: true,
       ...(tool === "make_conversation_call" ? { topic: "x" } : {}),
     };
     const r = await h.call(tool, args);
@@ -406,7 +407,7 @@ test("call tools forward recording/variables/model-tier/screening controls (#204
 test("call tools omit unset controls so backend defaults stand (#204)", async () => {
   let body = "unset";
   const h = harness(makeStub({ makeCall: async (a, n, g, f, v, opts) => { body = opts; return { id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }; } }));
-  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
+  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", confirm: true });
   // buildCallControls passes an object of all-undefined fields; applyCallControls
   // forwards none of them.
   for (const k of ["disableRecording", "variables", "modelTier", "callScreeningIdentity", "callScreeningPurpose"]) {
@@ -421,7 +422,7 @@ test("send_message: new-group recipients, channel, and interactive rules (tasks#
 
   // Existing group / single recipient via to_number still works.
   let h = harness(makeStub(stub));
-  let r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  let r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi", confirm: true });
   assert.equal(r.isError, undefined);
   assert.equal(body.toNumber, "+14155550123");
 
@@ -429,7 +430,7 @@ test("send_message: new-group recipients, channel, and interactive rules (tasks#
   // must be ACCEPTED here (the API dedupes); national/formatted numbers allowed.
   h = harness(makeStub(stub));
   const many = [...Array(32).fill("+14155550101"), "4155550102"];
-  r = await h.call("send_message", { agent_id: "agt_1", recipients: many, body: "hey group" });
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: many, body: "hey group", confirm: true });
   assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
   assert.deepEqual(body.recipients, many, "recipients forwarded unchanged for the API to normalize");
 
@@ -459,7 +460,7 @@ test("send_message: new-group recipients, channel, and interactive rules (tasks#
 
   // A valid WhatsApp template send forwards channel + template.
   h = harness(makeStub(stub));
-  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "", channel: "whatsapp", template: { name: "welcome" } });
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "", channel: "whatsapp", template: { name: "welcome" }, confirm: true });
   assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
   assert.equal(body.channel, "whatsapp");
   assert.deepEqual(body.template, { name: "welcome" });
@@ -485,7 +486,7 @@ test("send_message: new-group recipients, channel, and interactive rules (tasks#
 
   // A blank to_number alongside recipients must not forward both destinations.
   h = harness(makeStub(stub));
-  r = await h.call("send_message", { agent_id: "agt_1", to_number: "  ", recipients: ["+1", "+2"], body: "x" });
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "  ", recipients: ["+1", "+2"], body: "x", confirm: true });
   assert.equal(r.isError, undefined, r.isError ? r.content[0].text : "");
   assert.equal(body.toNumber, undefined, "blank to_number must be dropped");
   assert.deepEqual(body.recipients, ["+1", "+2"]);
@@ -602,6 +603,81 @@ test("check_readiness reports ready and the documented blocker states (tasks#199
   assert.ok(r.structuredContent.warnings.some((w) => /10DLC/.test(w)));
 });
 
+test("outbound tools require per-action confirmation before contacting anyone (directory review)", async () => {
+  // make_call: preview without confirm, no API call; executes with confirm.
+  let placed = 0;
+  let h = harness(makeStub({ makeCall: async () => { placed++; return { id: "call_1", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }; } }));
+  let r = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123" });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.structuredContent.confirmationRequired, true);
+  assert.match(r.content[0].text, /confirm=true/);
+  assert.equal(placed, 0, "no call placed without confirm");
+  assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(r.structuredContent).success, "preview validates against the output schema");
+  r = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", confirm: true });
+  assert.equal(placed, 1, "call placed with confirm=true");
+
+  // make_conversation_call: preview shows the destination and topic.
+  let convPlaced = 0;
+  h = harness(makeStub({ makeConversationCall: async () => { convPlaced++; return call; } }));
+  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "a quick survey" });
+  assert.equal(r.structuredContent.confirmationRequired, true);
+  assert.match(r.content[0].text, /\+14155550123/);
+  assert.match(r.content[0].text, /a quick survey/);
+  assert.equal(convPlaced, 0);
+  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success);
+
+  // send_message: single recipient preview, group preview with count, reaction preview.
+  let sent = 0;
+  h = harness(makeStub({ sendMessage: async () => { sent++; return { id: "m1", status: "sent", channel: "sms", from_number: "+1", to_number: "+2", media_urls: [], reply_to_message_id: null, reply_parent_unresolved: null }; } }));
+  r = await h.call("send_message", { agent_id: "agt_1", to_number: "+14155550123", body: "hi" });
+  assert.equal(r.structuredContent.confirmationRequired, true);
+  assert.match(r.content[0].text, /\+14155550123/);
+  assert.equal(sent, 0, "no message sent without confirm");
+  assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(r.structuredContent).success);
+  r = await h.call("send_message", { agent_id: "agt_1", recipients: ["+1", "+2", "+3"], body: "hey" });
+  assert.match(r.content[0].text, /3 recipient/);
+  assert.equal(sent, 0);
+  let reacted = 0;
+  h = harness(makeStub({ sendReaction: async () => { reacted++; return { id: "r1", reaction_type: "love", message_id: "m1", channel: "imessage" }; } }));
+  r = await h.call("send_message", { react_to_message_id: "m1", reaction: "love" });
+  assert.equal(r.structuredContent.confirmationRequired, true);
+  assert.equal(reacted, 0, "no reaction sent without confirm");
+});
+
+test("hosted agents get an enforced AI disclosure on create and update (directory review)", async () => {
+  // create: a hosted agent's prompt, opening line, and voicemail all disclose.
+  let created;
+  let h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));
+  await h.call("create_agent", { name: "A", voice_mode: "hosted", system_prompt: "Be helpful.", begin_message: "Hello!", voicemail_message: "Call me back." });
+  assert.match(created.systemPrompt, /AI assistant/i);
+  assert.match(created.systemPrompt, /Be helpful\./);
+  assert.match(created.beginMessage, /I'm an AI assistant/);
+  assert.match(created.voicemailMessage, /I'm an AI assistant/);
+
+  // create: a webhook agent (the user's own backend) is NOT forced to disclose.
+  h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));
+  await h.call("create_agent", { name: "B", voice_mode: "webhook", begin_message: "Hello!" });
+  assert.equal(created.beginMessage, "Hello!");
+  assert.equal(created.systemPrompt, undefined);
+
+  // update: explicit hosted mode wraps the touched fields.
+  let updated;
+  h = harness(makeStub({ updateAgent: async (_id, p) => { updated = p; return agent; } }));
+  await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted", begin_message: "Hey", voicemail_message: "bye" });
+  assert.match(updated.beginMessage, /I'm an AI assistant/);
+  assert.match(updated.voicemailMessage, /I'm an AI assistant/);
+
+  // update without voice_mode checks the current mode (hosted here) before injecting.
+  h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "hosted" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
+  await h.call("update_agent", { agent_id: "agt_1", voicemail_message: "ok" });
+  assert.match(updated.voicemailMessage, /I'm an AI assistant/);
+
+  // update on a webhook agent is left untouched.
+  h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "webhook" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
+  await h.call("update_agent", { agent_id: "agt_1", begin_message: "Human here" });
+  assert.equal(updated.beginMessage, "Human here");
+});
+
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
   assert.equal(registered.size, 32);
@@ -639,7 +715,7 @@ test("make_conversation_call returns immediately without any wait inputs (#192)"
   assert.ok(!("wait" in schema), "wait input must be removed");
   assert.ok(!("max_wait_seconds" in schema), "max_wait_seconds input must be removed");
   // Normal call returns the initiated state immediately, pointing at get_call.
-  const r = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155550123", topic: "x" });
+  const r = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155550123", topic: "x", confirm: true });
   assert.equal(r.isError, undefined);
   assert.match(r.content[0].text, /initiated/);
   assert.match(r.content[0].text, /get_call/);
@@ -659,7 +735,7 @@ test("get_call takes only call_id, with no wait/timeout, and never long-polls (#
 
 test("send_message reaction mode also validates", async () => {
   const h = harness(makeStub());
-  const r = await h.call("send_message", { react_to_message_id: "m1", reaction: "love" });
+  const r = await h.call("send_message", { react_to_message_id: "m1", reaction: "love", confirm: true });
   assert.equal(r.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.send_message.safeParse(r.structuredContent).success);
 });
@@ -782,7 +858,7 @@ test("alternate success branches still return schema-valid structured content", 
 
   // make_conversation_call returns the initiated call immediately
   h = harness(makeStub());
-  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x" });
+  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x", confirm: true });
   assert.equal(r.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success, "mcc/initiated");
 
@@ -813,12 +889,9 @@ const REQUIRED = {
   list_contacts: ["data"],
   list_webhook_deliveries: ["data"],
   get_call: ["id"],
-  make_call: ["id"],
-  make_conversation_call: ["id"],
   create_agent: ["id"],
   update_agent: ["id"],
   get_agent: ["id"],
-  send_message: ["id"],
   get_conversation: ["id"],
   get_conversation_messages: ["data"],
   update_conversation: ["id"],

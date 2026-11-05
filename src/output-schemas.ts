@@ -264,7 +264,8 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
   send_message: z
     .object({
-      id: z.string().describe("The sent message's ID (or the reaction's ID)."),
+      id: z.string().optional().describe("The sent message's ID (or the reaction's ID); absent on a confirmation preview."),
+      confirmationRequired: z.boolean().optional().describe("True when the message was only previewed (confirm was not true); re-call with confirm=true to send it."),
       status: z.string().optional().describe("Delivery status of the message."),
       channel: z.string().nullable().optional().describe("Channel used: sms or imessage, or null."),
       from_number: z.string().optional().describe("Number the message was sent from."),
@@ -367,9 +368,19 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .passthrough()
     .describe("Result of ending a call."),
 
-  make_call: callObject.describe("The initiated outbound call."),
+  make_call: callObject
+    .extend({
+      id: z.string().optional().describe("The call's ID (absent on a confirmation preview)."),
+      confirmationRequired: z.boolean().optional().describe("True when the call was only previewed (confirm was not true); re-call with confirm=true to place it."),
+    })
+    .describe("The initiated outbound call, or a confirmation-required preview when confirm was not set."),
 
-  make_conversation_call: callObject.describe("The call, with transcript turns when available."),
+  make_conversation_call: callObject
+    .extend({
+      id: z.string().optional().describe("The call's ID (absent on a confirmation preview)."),
+      confirmationRequired: z.boolean().optional().describe("True when the call was only previewed (confirm was not true); re-call with confirm=true to place it."),
+    })
+    .describe("The call (with transcript turns when available), or a confirmation-required preview when confirm was not set."),
 
   list_agents: z
     .object({ data: z.array(agentObject).describe("Agents on this page."), ...listMeta })

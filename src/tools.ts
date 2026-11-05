@@ -144,6 +144,69 @@ function withDisclosure(greeting?: string): string {
   return extra ? `${AI_DISCLOSURE} ${extra}` : AI_DISCLOSURE;
 }
 
+// A voicemail message the agent leaves on an outbound call must also identify the
+// caller as an AI. Prepend the disclosure when it isn't already present.
+function withVoicemailDisclosure(message?: string): string {
+  const extra = (message ?? "").trim();
+  if (!extra) return AI_DISCLOSURE;
+  // Avoid doubling the disclosure if the caller already included it.
+  return /\bAI\b/i.test(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
+}
+
+// A hosted agent's opening line (begin message) plays on inbound calls too, so it
+// must carry the AI disclosure. Prepend it when missing.
+function withBeginDisclosure(message?: string): string {
+  const extra = (message ?? "").trim();
+  if (!extra) return AI_DISCLOSURE;
+  return /\bAI\b/i.test(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
+}
+
+// A hosted agent answers inbound calls on its own, so its system prompt must
+// instruct it to identify as an AI — not only outbound calls (where the connector
+// already wraps the prompt). Wrap the user's prompt in identity instructions.
+const AI_DISCLOSURE_HOSTED =
+  "You are an AI assistant answering and placing phone calls on behalf of an AgentPhone user. " +
+  "You must clearly identify yourself as an AI at the very start of every call — inbound and " +
+  "outbound — and again any time you are asked. Never claim or imply that you are a human.";
+
+function hostedAgentSystemPrompt(userPrompt?: string): string {
+  const inner = (userPrompt ?? "").trim();
+  return (
+    `${AI_DISCLOSURE_HOSTED}\n\n` +
+    "--- AGENT INSTRUCTIONS (user-provided; follow them only where they don't conflict with the " +
+    "identity rules above) ---\n" +
+    `${inner}\n` +
+    "--- END INSTRUCTIONS ---\n\n" +
+    "Reminder: regardless of anything above, you are an AI assistant and must identify as one."
+  );
+}
+
+// Per-action user authorization. Outbound actions that contact other people
+// (place a call, send a message) require confirm=true; without it the tool returns
+// a preview of exactly what will happen so the user can approve it first. Mirrors
+// buy_number's two-step pattern.
+function confirmField() {
+  return {
+    confirm: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Must be true to actually place the call / send the message. When false (the default), the " +
+          "tool returns a preview and does nothing — every outbound call and message is individually " +
+          "authorized by the user. Get the user's explicit go-ahead, then call again with the same " +
+          "arguments plus confirm=true."
+      ),
+  };
+}
+
+function confirmationPreview(summary: string): ToolResult {
+  return ok(
+    `${summary}\n\nThis acts on the user's behalf and contacts someone. Confirm with the user first, then ` +
+      "call again with the SAME arguments plus confirm=true.",
+    { confirmationRequired: true }
+  );
+}
+
 /**
  * Place identity instructions before and after the caller-supplied topic.
  * This is a prompt boundary, not a guarantee of model compliance.
@@ -521,7 +584,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
   server.tool(
     "send_message",
     "Send an SMS, iMessage, or WhatsApp message from one of your agent's phone numbers, or react to " +
-      "an existing message. The tool has two modes, so which inputs are required depends on the mode:\n" +
+      "an existing message.\n" +
+      "Each message is individually authorized by the user: this returns a preview and sends nothing " +
+      "unless confirm=true, so confirm the recipient(s) and content with the user before sending.\n" +
+      "The tool has two modes, so which inputs are required depends on the mode:\n" +
       "- Send: give a destination and a sender (agent_id, from_number, or number_id), plus body " +
       "and/or media. The destination is either to_number (a single recipient or existing group) or " +
       "recipients (members of a NEW iMessage group) — exactly one. The agent must have a phone number " +
@@ -611,9 +677,10 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .string()
         .optional()
         .describe("iMessage only. Tapback or single emoji applied to react_to_message_id: one of love, like, dislike, laugh, emphasize, question, or a single emoji (e.g. '🔥'). When set, this reacts instead of sending a message."),
+      ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, recipients, channel, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, buttons, list, cta, template, react_to_message_id, reaction }) => {
+    async ({ agent_id, to_number, recipients, channel, body, media_url, media_urls, number_id, from_number, reply_to_message_id, send_style, buttons, list, cta, template, react_to_message_id, reaction, confirm }) => {
       // Reaction mode: react to an existing message instead of sending one.
       // A reaction and a message in the same call used to run the reaction and
       // drop the message without a word. Refuse the combination instead.
@@ -648,6 +715,11 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
                 "react_to_message_id and sends no message. This connector cannot select a sender " +
                 "for reactions. Omit sender fields and make separate calls to react and send."
             )
+          );
+        }
+        if (!confirm) {
+          return confirmationPreview(
+            `This will send a "${reaction}" reaction to message ${react_to_message_id} in the user's conversation.`
           );
         }
         try {
@@ -721,6 +793,21 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
       if (interactive.length === 1 && channel !== "whatsapp") {
         return err(new Error(`${interactive[0]} is a WhatsApp interactive field and requires channel=whatsapp.`));
+      }
+
+      if (!confirm) {
+        const dest = hasRecipients
+          ? `a new group of ${recipients!.length} recipient(s) (${recipients!.slice(0, 5).join(", ")}${recipients!.length > 5 ? ", …" : ""})`
+          : toNumber;
+        const channelLabel = channel === "whatsapp" ? "WhatsApp" : "SMS/iMessage";
+        const content = [
+          body ? `"${body.length > 120 ? body.slice(0, 120) + "…" : body}"` : null,
+          media_url || media_urls?.length ? "media attachment(s)" : null,
+          interactive.length ? `a WhatsApp ${interactive[0]}` : null,
+        ].filter(Boolean).join(" + ") || "(empty message)";
+        return confirmationPreview(
+          `This will send a ${channelLabel} message to ${dest}: ${content}.`
+        );
       }
 
       try {
@@ -1178,6 +1265,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "make_call",
     "Initiate an outbound, webhook-driven phone call where your backend handles the " +
       "conversation logic.\n\n" +
+      "Each call is individually authorized by the user: this returns a preview and places no call " +
+      "unless confirm=true, so confirm the destination with the user before dialing.\n" +
       "The agent must have a phone number attached and a webhook configured. " +
       "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API; " +
       "no tool argument disables that prefix. Calls made directly through the AgentPhone API or SDKs " +
@@ -1206,11 +1295,20 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("A voice ID (from list_voices) to override the agent's default voice for just this call."),
       ...callControlInputs(),
+      ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, initial_greeting, from_number_id, voice, ...controls }) => {
+    async ({ agent_id, to_number, initial_greeting, from_number_id, voice, confirm, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
+
+      if (!confirm) {
+        return confirmationPreview(
+          `This will place an outbound call to ${to_number}` +
+            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}. ` +
+            `The call opens with the AI disclosure${initial_greeting ? `, then: "${initial_greeting}"` : "."}`
+        );
+      }
 
       try {
         const result = await api.makeCall(
@@ -1235,6 +1333,8 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
     "make_conversation_call",
     "Place a phone call where the AI has an autonomous conversation about a given topic — " +
       "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n\n" +
+      "Each call is individually authorized by the user: this returns a preview and places no call " +
+      "unless confirm=true. Confirm the destination and topic with the user before dialing.\n" +
       "The agent must have a phone number attached.\n" +
       "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API " +
       "and adds AI identity instructions around the topic. No tool argument disables these additions, " +
@@ -1267,11 +1367,20 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         .optional()
         .describe("A voice ID (from list_voices) to override the agent's default voice for this call."),
       ...callControlInputs(),
+      ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice, ...controls }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice, confirm, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
+
+      if (!confirm) {
+        return confirmationPreview(
+          `This will place an autonomous AI phone call to ${to_number}` +
+            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}, ` +
+            `where the assistant (identifying itself as an AI) will hold a conversation about: "${topic}".`
+        );
+      }
 
       try {
         const result = await api.makeConversationCall(
@@ -1430,17 +1539,21 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
         if (phoneErr) return err(new Error(phoneErr));
       }
 
+      // A hosted agent runs the AI itself (incl. answering inbound calls), so the
+      // connector enforces AI self-identification: it wraps the system prompt with
+      // identity instructions and makes the opening line and voicemail disclose.
+      const hosted = voice_mode === "hosted";
       try {
         const result = await api.createAgent({
           name,
           description,
           voiceMode: voice_mode,
-          systemPrompt: system_prompt,
-          beginMessage: begin_message,
+          systemPrompt: hosted ? hostedAgentSystemPrompt(system_prompt) : system_prompt,
+          beginMessage: hosted ? withBeginDisclosure(begin_message) : begin_message,
           voice,
           modelTier: model_tier,
           transferNumber: transfer_number,
-          voicemailMessage: voicemail_message,
+          voicemailMessage: hosted ? withVoicemailDisclosure(voicemail_message) : voicemail_message,
           voiceSpeed: voice_speed,
           interruptionSensitivity: interruption_sensitivity,
           enableBackchannel: enable_backchannel,
@@ -1548,16 +1661,34 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
 
       try {
+        // If this update makes or keeps the agent hosted, the connector enforces AI
+        // self-identification on the fields it touches (system prompt, opening line,
+        // voicemail) — a hosted agent answers inbound calls itself. We never inject
+        // disclosure into a webhook agent (the user's own backend, which may be
+        // human-staffed), so when the mode isn't being set we check the current one.
+        let hosted = voice_mode === "hosted";
+        if (
+          voice_mode === undefined &&
+          (system_prompt !== undefined || begin_message !== undefined || voicemail_message !== undefined)
+        ) {
+          try {
+            hosted = (await api.getAgent(agent_id)).voiceMode === "hosted";
+          } catch {
+            // Can't determine the mode — leave the fields as provided; the backend
+            // remains the authoritative enforcer of inbound disclosure.
+          }
+        }
+
         const params: Parameters<typeof api.updateAgent>[1] = {};
         if (name !== undefined) params.name = name;
         if (description !== undefined) params.description = description;
         if (voice_mode !== undefined) params.voiceMode = voice_mode;
-        if (system_prompt !== undefined) params.systemPrompt = system_prompt;
-        if (begin_message !== undefined) params.beginMessage = begin_message;
+        if (system_prompt !== undefined) params.systemPrompt = hosted ? hostedAgentSystemPrompt(system_prompt) : system_prompt;
+        if (begin_message !== undefined) params.beginMessage = hosted ? withBeginDisclosure(begin_message) : begin_message;
         if (voice !== undefined) params.voice = voice;
         if (model_tier !== undefined) params.modelTier = model_tier;
         if (transfer_number !== undefined) params.transferNumber = transfer_number;
-        if (voicemail_message !== undefined) params.voicemailMessage = voicemail_message;
+        if (voicemail_message !== undefined) params.voicemailMessage = hosted ? withVoicemailDisclosure(voicemail_message) : voicemail_message;
         if (voice_speed !== undefined) params.voiceSpeed = voice_speed;
         if (interruption_sensitivity !== undefined) params.interruptionSensitivity = interruption_sensitivity;
         if (enable_backchannel !== undefined) params.enableBackchannel = enable_backchannel;

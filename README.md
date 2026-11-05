@@ -157,6 +157,12 @@ The optional anonymous mode instead uses the configured server API key.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
+## Authorization & AI disclosure
+
+- **Every outbound call and message is individually authorized by the user.** `make_call`, `make_conversation_call`, and `send_message` do nothing unless `confirm=true` is passed — without it they return a preview of the exact destination(s) and content for the user to approve first (the same two-step pattern `buy_number` uses). There is no bulk-send path that skips a person in the loop.
+- **AI self-identification is enforced.** Outbound calls placed through the call tools open with an AI disclosure that no argument disables. Hosted agents created or updated through this connector also carry the disclosure in their system prompt, opening line, and voicemail message, so they identify as AI on inbound calls and voicemail too.
+- **No audio is exposed.** Voice synthesis happens only inside live calls; no tool returns audio files or call recordings. (`list_voices` includes a static voice-sample `preview_audio_url`, which is a library clip, not call audio.)
+
 ## All Tools (32)
 
 ### Account
@@ -177,7 +183,7 @@ The optional anonymous mode instead uses the configured server API key.
 
 | Tool | Description |
 |------|-------------|
-| `send_message` | Send SMS, iMessage, or WhatsApp. Supports media, threaded replies (`reply_to_message_id`), iMessage effects (`send_style`), existing groups (`to_number`) or new groups (`recipients`), and WhatsApp interactive content (`channel=whatsapp` with `buttons`/`list`/`cta`/`template`) |
+| `send_message` | Send SMS, iMessage, or WhatsApp. **Requires `confirm=true`** (previews first — every message is individually authorized by the user). Supports media, threaded replies (`reply_to_message_id`), iMessage effects (`send_style`), existing groups (`to_number`) or new groups (`recipients`), and WhatsApp interactive content (`channel=whatsapp` with `buttons`/`list`/`cta`/`template`) |
 | `check_capabilities` | Check which channels a phone number can receive (iMessage / SMS / RCS) before sending |
 | `check_readiness` | Check a number is ready before sending/calling: active + assigned + channel-capable are hard blockers; A2P/10DLC registration and recipient reachability are warnings. Returns `ready`, blockers, warnings, and next steps (credit/concurrency are enforced at send time, not pre-checkable) |
 | `get_messages` | Get messages for a specific number. Page older history with `cursor` (from `nextCursor`); `before`/`after` are optional time filters. |
@@ -200,8 +206,8 @@ The optional anonymous mode instead uses the configured server API key.
 | `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
 | `get_call` | Get call details and transcript |
 | `end_call` | End an in-progress call (safe to retry; ending a finished call is a no-op) |
-| `make_call` | Place an outbound call (webhook-driven). Supports recording, variables, model tier, and call-screening controls |
-| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. Supports recording, variables, model tier, and call-screening controls |
+| `make_call` | Place an outbound call (webhook-driven). **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, and call-screening controls |
+| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, and call-screening controls |
 
 ### Agents
 
