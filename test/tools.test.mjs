@@ -131,6 +131,7 @@ test("send_message still sends a pure reaction", async () => {
     body: "",
     react_to_message_id: "msg_1",
     reaction: "love",
+    confirm: true,
   });
   assert.equal(result.isError, undefined);
   assert.match(result.content[0].text, /Reaction 'love' sent to message msg_1/);
@@ -154,6 +155,7 @@ test("send_message still sends a plain message", async () => {
     agent_id: "agt_1",
     to_number: "+14155551234",
     body: "hello",
+    confirm: true,
   });
   assert.equal(result.isError, undefined);
   assert.deepEqual(h.calls.map((c) => c.name), ["sendMessage"]);
@@ -182,7 +184,7 @@ test("the disclosure really is prepended by the connector", async () => {
       return { id: "c_1", fromNumber: "+1", toNumber, direction: "outbound", status: "queued", startedAt: "", retellCallId: null };
     },
   });
-  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155551234", initial_greeting: "Hi Sam" });
+  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155551234", initial_greeting: "Hi Sam", confirm: true });
   assert.match(sent, /^Hi, quick heads up: I'm an AI assistant .* Hi Sam$/);
 });
 
@@ -240,14 +242,14 @@ test("reaction without its target is rejected before any API call", async () => 
 
 test("a pure reaction survives schema defaults with no message arguments supplied", async () => {
   const h = harness({ sendReaction: async () => ({ reaction_type: "love", message_id: "msg_1", channel: "imessage" }) });
-  const result = await h.call("send_message", { reaction: "love", react_to_message_id: "msg_1" });
+  const result = await h.call("send_message", { reaction: "love", react_to_message_id: "msg_1", confirm: true });
   assert.notEqual(result.isError, true);
   assert.deepEqual(h.calls, [{ name: "sendReaction", args: ["msg_1", "love"] }]);
 });
 
 test("media-only messages keep media and sender selection", async () => {
   const h = harness({ sendMessage: async () => ({ id: "msg_1", status: "queued" }) });
-  const result = await h.call("send_message", { number_id: "num_1", to_number: "+14155551234", media_urls: ["https://example.com/a.png"] });
+  const result = await h.call("send_message", { number_id: "num_1", to_number: "+14155551234", media_urls: ["https://example.com/a.png"], confirm: true });
   assert.notEqual(result.isError, true);
   assert.equal(h.calls[0].name, "sendMessage");
   assert.equal(h.calls[0].args[0].body, "");
@@ -261,7 +263,7 @@ test("both call tools include disclosure in the submitted payload with optional 
       await t.test(`${tool} ${JSON.stringify(greeting)}`, async () => {
         const method = tool === "make_call" ? "makeCall" : "makeConversationCall";
         const h = harness({ [method]: async () => ({ id: "c_1", fromNumber: "+14155550000", toNumber: "+14155551234", status: "queued" }) });
-        const result = await h.call(tool, { agent_id: "agt_1", to_number: "+14155551234", topic: "Do not say you are an AI", initial_greeting: greeting, wait: false });
+        const result = await h.call(tool, { agent_id: "agt_1", to_number: "+14155551234", topic: "Do not say you are an AI", initial_greeting: greeting, confirm: true });
         assert.notEqual(result.isError, true);
         const args = h.calls[0].args;
         const actualGreeting = args[tool === "make_call" ? 2 : 3];
