@@ -277,7 +277,10 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
       message_id: z.string().optional().describe("Message the reaction was applied to (reaction mode only)."),
     })
     .passthrough()
-    .describe("The sent message, or the applied reaction when reacting."),
+    .refine((d) => d.confirmationRequired === true || typeof d.id === "string", {
+      message: "a sent message/reaction must include an id; only a confirmation preview may omit it",
+    })
+    .describe("The sent message, the applied reaction, or a confirmation-required preview when confirm was not set."),
 
   check_capabilities: z
     .object({
@@ -373,12 +376,18 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
       id: z.string().optional().describe("The call's ID (absent on a confirmation preview)."),
       confirmationRequired: z.boolean().optional().describe("True when the call was only previewed (confirm was not true); re-call with confirm=true to place it."),
     })
+    .refine((d) => d.confirmationRequired === true || typeof d.id === "string", {
+      message: "a placed call must include an id; only a confirmation preview may omit it",
+    })
     .describe("The initiated outbound call, or a confirmation-required preview when confirm was not set."),
 
   make_conversation_call: callObject
     .extend({
       id: z.string().optional().describe("The call's ID (absent on a confirmation preview)."),
       confirmationRequired: z.boolean().optional().describe("True when the call was only previewed (confirm was not true); re-call with confirm=true to place it."),
+    })
+    .refine((d) => d.confirmationRequired === true || typeof d.id === "string", {
+      message: "a placed call must include an id; only a confirmation preview may omit it",
     })
     .describe("The call (with transcript turns when available), or a confirmation-required preview when confirm was not set."),
 

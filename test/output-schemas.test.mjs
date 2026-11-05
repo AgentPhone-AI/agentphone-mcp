@@ -654,18 +654,38 @@ test("hosted agents get an enforced AI disclosure on create and update (director
   assert.match(created.beginMessage, /I'm an AI assistant/);
   assert.match(created.voicemailMessage, /I'm an AI assistant/);
 
-  // create: a webhook agent (the user's own backend) is NOT forced to disclose.
+  // A text that merely mentions "AI" is NOT treated as already-disclosing.
   h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));
-  await h.call("create_agent", { name: "B", voice_mode: "webhook", begin_message: "Hello!" });
+  await h.call("create_agent", { name: "A2", voice_mode: "hosted", system_prompt: "x", begin_message: "Discuss AI ethics", voicemail_message: "Ask about AI" });
+  assert.match(created.beginMessage, /I'm an AI assistant .*Discuss AI ethics/);
+  assert.match(created.voicemailMessage, /I'm an AI assistant .*Ask about AI/);
+
+  // create: a webhook agent (the user's own backend) is NOT forced to disclose —
+  // including its voicemail.
+  h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));
+  await h.call("create_agent", { name: "B", voice_mode: "webhook", begin_message: "Hello!", voicemail_message: "Leave a message" });
   assert.equal(created.beginMessage, "Hello!");
+  assert.equal(created.voicemailMessage, "Leave a message");
   assert.equal(created.systemPrompt, undefined);
 
-  // update: explicit hosted mode wraps the touched fields.
+  // update: explicit hosted mode wraps the touched fields AND the system prompt.
   let updated;
   h = harness(makeStub({ updateAgent: async (_id, p) => { updated = p; return agent; } }));
-  await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted", begin_message: "Hey", voicemail_message: "bye" });
+  await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted", system_prompt: "Be nice.", begin_message: "Hey", voicemail_message: "bye" });
+  assert.match(updated.systemPrompt, /AI assistant/i);
+  assert.match(updated.systemPrompt, /Be nice\./);
   assert.match(updated.beginMessage, /I'm an AI assistant/);
   assert.match(updated.voicemailMessage, /I'm an AI assistant/);
+
+  // Switching INTO hosted also disclosure-wraps the EXISTING opening line/voicemail
+  // this update doesn't touch (fetched from the current agent).
+  h = harness(makeStub({
+    getAgent: async () => ({ ...agent, voiceMode: "webhook", beginMessage: "Hi there", voicemailMessage: "Missed you" }),
+    updateAgent: async (_id, p) => { updated = p; return agent; },
+  }));
+  await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted" });
+  assert.match(updated.beginMessage, /I'm an AI assistant .*Hi there/);
+  assert.match(updated.voicemailMessage, /I'm an AI assistant .*Missed you/);
 
   // update without voice_mode checks the current mode (hosted here) before injecting.
   h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "hosted" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
@@ -676,6 +696,16 @@ test("hosted agents get an enforced AI disclosure on create and update (director
   h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "webhook" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
   await h.call("update_agent", { agent_id: "agt_1", begin_message: "Human here" });
   assert.equal(updated.beginMessage, "Human here");
+
+  // Fail closed: if the agent can't be read to determine disclosure, abort the update.
+  let updateCalled = false;
+  h = harness(makeStub({
+    getAgent: async () => { throw new ApiError(500, "GET", "/v1/agents/agt_1", "boom"); },
+    updateAgent: async () => { updateCalled = true; return agent; },
+  }));
+  const failed = await h.call("update_agent", { agent_id: "agt_1", voicemail_message: "x" });
+  assert.equal(failed.isError, true);
+  assert.equal(updateCalled, false, "update must not proceed when the agent mode can't be read");
 });
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {

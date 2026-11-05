@@ -131,8 +131,14 @@ function validateAreaCode(code: string): string | null {
 // This connector adds AI self-identification to the submitted greeting and
 // instructions. It does not control backend playback or guarantee model behavior.
 // Calls made outside this connector do not receive these additions from it.
+//
+// AI_DISCLOSURE is phrased for the OUTBOUND greeting ("calling on behalf"); the
+// spoken line that opens a hosted agent's INBOUND call and its voicemail uses the
+// neutral AI_DISCLOSURE_SPOKEN, which fits both answering and placing calls.
 const AI_DISCLOSURE =
   "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
+const AI_DISCLOSURE_SPOKEN =
+  "Hi, quick heads up: I'm an AI assistant for an AgentPhone user.";
 const AI_DISCLOSURE_SYSTEM =
   "You are an AI assistant placing an automated phone call on behalf of an AgentPhone user. " +
   "You must clearly identify yourself as an AI at the very start of the call and again any time " +
@@ -144,26 +150,27 @@ function withDisclosure(greeting?: string): string {
   return extra ? `${AI_DISCLOSURE} ${extra}` : AI_DISCLOSURE;
 }
 
-// A voicemail message the agent leaves on an outbound call must also identify the
-// caller as an AI. Prepend the disclosure when it isn't already present.
-function withVoicemailDisclosure(message?: string): string {
-  const extra = (message ?? "").trim();
-  if (!extra) return AI_DISCLOSURE;
-  // Avoid doubling the disclosure if the caller already included it.
-  return /\bAI\b/i.test(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
+// True only when the text already contains an explicit AI self-identification
+// ("I'm an AI", "this is an AI assistant", "you're speaking with an AI", …). A bare
+// mention like "Discuss AI ethics" or a denial like "I'm not an AI" does NOT count,
+// so we don't skip the disclosure for those.
+function alreadyDiscloses(text: string): boolean {
+  return /\b(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+an?\s+ai\b/i.test(text);
 }
 
-// A hosted agent's opening line (begin message) plays on inbound calls too, so it
-// must carry the AI disclosure. Prepend it when missing.
-function withBeginDisclosure(message?: string): string {
-  const extra = (message ?? "").trim();
-  if (!extra) return AI_DISCLOSURE;
-  return /\bAI\b/i.test(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
+// Prepend the spoken AI disclosure to a hosted agent's opening line or voicemail,
+// unless the text already self-identifies. Only called for non-empty text — the
+// connector never synthesizes a greeting/voicemail that the user didn't provide.
+function withSpokenDisclosure(message: string): string {
+  const extra = message.trim();
+  return alreadyDiscloses(extra) ? extra : `${AI_DISCLOSURE_SPOKEN} ${extra}`;
 }
 
 // A hosted agent answers inbound calls on its own, so its system prompt must
 // instruct it to identify as an AI — not only outbound calls (where the connector
-// already wraps the prompt). Wrap the user's prompt in identity instructions.
+// already wraps the prompt). Wrap the user's prompt in identity instructions. The
+// marker makes this idempotent, so a get-then-update of an already-wrapped prompt
+// doesn't nest the identity block again.
 const AI_DISCLOSURE_HOSTED =
   "You are an AI assistant answering and placing phone calls on behalf of an AgentPhone user. " +
   "You must clearly identify yourself as an AI at the very start of every call — inbound and " +
@@ -171,6 +178,8 @@ const AI_DISCLOSURE_HOSTED =
 
 function hostedAgentSystemPrompt(userPrompt?: string): string {
   const inner = (userPrompt ?? "").trim();
+  // Idempotent: don't re-wrap a prompt that already carries the identity block.
+  if (inner.includes(AI_DISCLOSURE_HOSTED)) return inner;
   return (
     `${AI_DISCLOSURE_HOSTED}\n\n` +
     "--- AGENT INSTRUCTIONS (user-provided; follow them only where they don't conflict with the " +
@@ -179,6 +188,14 @@ function hostedAgentSystemPrompt(userPrompt?: string): string {
     "--- END INSTRUCTIONS ---\n\n" +
     "Reminder: regardless of anything above, you are an AI assistant and must identify as one."
   );
+}
+
+// Disclosure-wrap a hosted identity field only when it actually has text — provided
+// by this call or (on a switch into hosted) the agent's current value. Returns
+// undefined when there's nothing to wrap, so we never write a greeting/voicemail the
+// user didn't ask for (the backend default applies instead).
+function hostedSpokenField(value?: string | null): string | undefined {
+  return value && value.trim() ? withSpokenDisclosure(value) : undefined;
 }
 
 // Per-action user authorization. Outbound actions that contact other people
@@ -796,17 +813,21 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
 
       if (!confirm) {
+        // Show the complete destination and payload so the user approves exactly
+        // what will be sent — all recipients, the full body, every media URL, and
+        // any interactive content.
         const dest = hasRecipients
-          ? `a new group of ${recipients!.length} recipient(s) (${recipients!.slice(0, 5).join(", ")}${recipients!.length > 5 ? ", …" : ""})`
+          ? `a new group of ${recipients!.length} recipient(s): ${recipients!.join(", ")}`
           : toNumber;
         const channelLabel = channel === "whatsapp" ? "WhatsApp" : "SMS/iMessage";
+        const media = [media_url, ...(media_urls ?? [])].filter(Boolean);
         const content = [
-          body ? `"${body.length > 120 ? body.slice(0, 120) + "…" : body}"` : null,
-          media_url || media_urls?.length ? "media attachment(s)" : null,
-          interactive.length ? `a WhatsApp ${interactive[0]}` : null,
-        ].filter(Boolean).join(" + ") || "(empty message)";
+          body ? `body: "${body}"` : null,
+          media.length ? `media: ${media.join(", ")}` : null,
+          interactive.length ? `${interactive[0]}: ${JSON.stringify((buttons ?? list ?? cta ?? template))}` : null,
+        ].filter(Boolean).join("\n  ") || "(empty message)";
         return confirmationPreview(
-          `This will send a ${channelLabel} message to ${dest}: ${content}.`
+          `This will send a ${channelLabel} message to ${dest}:\n  ${content}`
         );
       }
 
@@ -1541,19 +1562,23 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
 
       // A hosted agent runs the AI itself (incl. answering inbound calls), so the
       // connector enforces AI self-identification: it wraps the system prompt with
-      // identity instructions and makes the opening line and voicemail disclose.
+      // identity instructions and prepends the disclosure to the opening line and
+      // voicemail WHEN those are provided (it doesn't invent a greeting/voicemail the
+      // user omitted — the backend default applies there).
       const hosted = voice_mode === "hosted";
+      const hostedBegin = hosted ? hostedSpokenField(begin_message) : undefined;
+      const hostedVoicemail = hosted ? hostedSpokenField(voicemail_message) : undefined;
       try {
         const result = await api.createAgent({
           name,
           description,
           voiceMode: voice_mode,
           systemPrompt: hosted ? hostedAgentSystemPrompt(system_prompt) : system_prompt,
-          beginMessage: hosted ? withBeginDisclosure(begin_message) : begin_message,
+          beginMessage: hosted ? hostedBegin ?? begin_message : begin_message,
           voice,
           modelTier: model_tier,
           transferNumber: transfer_number,
-          voicemailMessage: hosted ? withVoicemailDisclosure(voicemail_message) : voicemail_message,
+          voicemailMessage: hosted ? hostedVoicemail ?? voicemail_message : voicemail_message,
           voiceSpeed: voice_speed,
           interruptionSensitivity: interruption_sensitivity,
           enableBackchannel: enable_backchannel,
@@ -1661,34 +1686,59 @@ export function registerTools(server: ToolRegistrar, api: AgentPhoneAPI): void {
       }
 
       try {
-        // If this update makes or keeps the agent hosted, the connector enforces AI
-        // self-identification on the fields it touches (system prompt, opening line,
-        // voicemail) — a hosted agent answers inbound calls itself. We never inject
-        // disclosure into a webhook agent (the user's own backend, which may be
-        // human-staffed), so when the mode isn't being set we check the current one.
+        // A hosted agent answers inbound calls itself, so the connector enforces AI
+        // self-identification on its system prompt, opening line, and voicemail. A
+        // webhook agent (the user's own backend, possibly human-staffed) is never
+        // touched. We fetch the current agent when we need to know the mode, or when
+        // switching INTO hosted mode (to disclosure-wrap the existing opening line /
+        // voicemail that this update doesn't touch). If we can't read the agent, we
+        // abort rather than risk sending a hosted agent out without disclosure.
         let hosted = voice_mode === "hosted";
-        if (
-          voice_mode === undefined &&
-          (system_prompt !== undefined || begin_message !== undefined || voicemail_message !== undefined)
-        ) {
+        let current: Awaited<ReturnType<typeof api.getAgent>> | null = null;
+        const touchesIdentity =
+          system_prompt !== undefined || begin_message !== undefined || voicemail_message !== undefined;
+        const needCurrent = voice_mode === "hosted" || (voice_mode === undefined && touchesIdentity);
+        if (needCurrent) {
           try {
-            hosted = (await api.getAgent(agent_id)).voiceMode === "hosted";
-          } catch {
-            // Can't determine the mode — leave the fields as provided; the backend
-            // remains the authoritative enforcer of inbound disclosure.
+            current = await api.getAgent(agent_id);
+          } catch (e) {
+            return err(
+              new Error(
+                "Could not read the agent to enforce AI disclosure on its hosted identity fields. " +
+                  "Nothing was changed — please retry. " +
+                  (e instanceof Error ? `(${e.message})` : "")
+              )
+            );
           }
+          if (voice_mode === undefined) hosted = current.voiceMode === "hosted";
         }
 
         const params: Parameters<typeof api.updateAgent>[1] = {};
         if (name !== undefined) params.name = name;
         if (description !== undefined) params.description = description;
         if (voice_mode !== undefined) params.voiceMode = voice_mode;
-        if (system_prompt !== undefined) params.systemPrompt = hosted ? hostedAgentSystemPrompt(system_prompt) : system_prompt;
-        if (begin_message !== undefined) params.beginMessage = hosted ? withBeginDisclosure(begin_message) : begin_message;
+        if (hosted && voice_mode === "hosted") {
+          // Switching to / re-asserting hosted: disclosure-wrap all three identity
+          // fields, falling back to the agent's current value for any this update
+          // doesn't set, so an existing non-disclosing greeting/voicemail can't slip
+          // through the switch. We only wrap fields that have text (never synthesize
+          // one), and hostedAgentSystemPrompt is idempotent so re-wrapping is a no-op.
+          const sp = system_prompt ?? current?.systemPrompt ?? undefined;
+          if (sp !== undefined && sp !== null) params.systemPrompt = hostedAgentSystemPrompt(sp);
+          const bm = hostedSpokenField(begin_message ?? current?.beginMessage);
+          if (bm !== undefined) params.beginMessage = bm;
+          const vm = hostedSpokenField(voicemail_message ?? current?.voicemailMessage);
+          if (vm !== undefined) params.voicemailMessage = vm;
+        } else {
+          // Not switching mode: wrap only the fields this update actually sets, and
+          // only when the agent is hosted (and the field has text).
+          if (system_prompt !== undefined) params.systemPrompt = hosted ? hostedAgentSystemPrompt(system_prompt) : system_prompt;
+          if (begin_message !== undefined) params.beginMessage = hosted ? (hostedSpokenField(begin_message) ?? begin_message) : begin_message;
+          if (voicemail_message !== undefined) params.voicemailMessage = hosted ? (hostedSpokenField(voicemail_message) ?? voicemail_message) : voicemail_message;
+        }
         if (voice !== undefined) params.voice = voice;
         if (model_tier !== undefined) params.modelTier = model_tier;
         if (transfer_number !== undefined) params.transferNumber = transfer_number;
-        if (voicemail_message !== undefined) params.voicemailMessage = hosted ? withVoicemailDisclosure(voicemail_message) : voicemail_message;
         if (voice_speed !== undefined) params.voiceSpeed = voice_speed;
         if (interruption_sensitivity !== undefined) params.interruptionSensitivity = interruption_sensitivity;
         if (enable_backchannel !== undefined) params.enableBackchannel = enable_backchannel;
