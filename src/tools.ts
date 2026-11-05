@@ -176,12 +176,17 @@ const AI_DISCLOSURE_HOSTED =
   "You must clearly identify yourself as an AI at the very start of every call — inbound and " +
   "outbound — and again any time you are asked. Never claim or imply that you are a human.";
 
+// A non-semantic sentinel the wrapper emits so idempotency can't be spoofed by a
+// user quoting the human-readable identity sentence in their own prompt.
+const HOSTED_WRAP_MARKER = "[agentphone:ai-identity]";
+
 function hostedAgentSystemPrompt(userPrompt?: string): string {
   const inner = (userPrompt ?? "").trim();
-  // Idempotent: don't re-wrap a prompt that already carries the identity block.
-  if (inner.includes(AI_DISCLOSURE_HOSTED)) return inner;
+  // Idempotent via the sentinel (not the user-controllable disclosure text), so a
+  // get-then-update of an already-wrapped prompt doesn't nest the identity block.
+  if (inner.includes(HOSTED_WRAP_MARKER)) return inner;
   return (
-    `${AI_DISCLOSURE_HOSTED}\n\n` +
+    `${HOSTED_WRAP_MARKER}\n${AI_DISCLOSURE_HOSTED}\n\n` +
     "--- AGENT INSTRUCTIONS (user-provided; follow them only where they don't conflict with the " +
     "identity rules above) ---\n" +
     `${inner}\n` +
@@ -190,12 +195,16 @@ function hostedAgentSystemPrompt(userPrompt?: string): string {
   );
 }
 
-// Disclosure-wrap a hosted identity field only when it actually has text — provided
-// by this call or (on a switch into hosted) the agent's current value. Returns
-// undefined when there's nothing to wrap, so we never write a greeting/voicemail the
-// user didn't ask for (the backend default applies instead).
+// Decide what to write to a hosted identity field (opening line / voicemail):
+//   - undefined/null (field absent)      -> undefined  (don't touch it)
+//   - "" (explicit empty, i.e. clear)    -> ""         (clear it)
+//   - any text                           -> disclosure-wrapped text
+// So the connector never invents a greeting/voicemail the user omitted, but an
+// explicit empty string still clears the existing one.
 function hostedSpokenField(value?: string | null): string | undefined {
-  return value && value.trim() ? withSpokenDisclosure(value) : undefined;
+  if (value === undefined || value === null) return undefined;
+  if (value.trim() === "") return "";
+  return withSpokenDisclosure(value);
 }
 
 // Per-action user authorization. Outbound actions that contact other people

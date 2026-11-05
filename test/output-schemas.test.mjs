@@ -677,15 +677,29 @@ test("hosted agents get an enforced AI disclosure on create and update (director
   assert.match(updated.beginMessage, /I'm an AI assistant/);
   assert.match(updated.voicemailMessage, /I'm an AI assistant/);
 
-  // Switching INTO hosted also disclosure-wraps the EXISTING opening line/voicemail
-  // this update doesn't touch (fetched from the current agent).
+  // Switching INTO hosted also disclosure-wraps the EXISTING system prompt, opening
+  // line, and voicemail this update doesn't touch (fetched from the current agent).
   h = harness(makeStub({
-    getAgent: async () => ({ ...agent, voiceMode: "webhook", beginMessage: "Hi there", voicemailMessage: "Missed you" }),
+    getAgent: async () => ({ ...agent, voiceMode: "webhook", systemPrompt: "Answer billing questions.", beginMessage: "Hi there", voicemailMessage: "Missed you" }),
     updateAgent: async (_id, p) => { updated = p; return agent; },
   }));
   await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted" });
+  assert.match(updated.systemPrompt, /AI assistant/i);
+  assert.match(updated.systemPrompt, /Answer billing questions\./);
   assert.match(updated.beginMessage, /I'm an AI assistant .*Hi there/);
   assert.match(updated.voicemailMessage, /I'm an AI assistant .*Missed you/);
+
+  // Idempotent: re-asserting hosted on an already-wrapped prompt doesn't nest the
+  // identity block again.
+  const wrappedOnce = updated.systemPrompt;
+  h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "hosted", systemPrompt: wrappedOnce }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
+  await h.call("update_agent", { agent_id: "agt_1", voice_mode: "hosted" });
+  assert.equal(updated.systemPrompt, wrappedOnce, "already-wrapped prompt must not be re-wrapped");
+
+  // An explicit empty string clears a hosted voicemail (it is not treated as omitted).
+  h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "hosted", voicemailMessage: "old" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
+  await h.call("update_agent", { agent_id: "agt_1", voicemail_message: "" });
+  assert.equal(updated.voicemailMessage, "", "explicit empty string must clear the voicemail");
 
   // update without voice_mode checks the current mode (hosted here) before injecting.
   h = harness(makeStub({ getAgent: async () => ({ ...agent, voiceMode: "hosted" }), updateAgent: async (_id, p) => { updated = p; return agent; } }));
