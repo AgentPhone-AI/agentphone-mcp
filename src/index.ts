@@ -23,6 +23,20 @@ import { z } from "zod";
 import { AgentPhoneAPI } from "./api.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
+import {
+  wake,
+  WAKESHIFT_WRAP,
+  WAKESHIFT_OUTPUT_SCHEMAS,
+  emitMessageReceived,
+} from "./wakeshift.js";
+import {
+  MESSAGE_RECEIVED_PATH,
+  MAX_EVENT_BODY_BYTES,
+  handleMessageReceived,
+  signingKey,
+} from "./backend-events.js";
+
+const outputSchemaFor = (name: string) => OUTPUT_SCHEMAS[name] ?? WAKESHIFT_OUTPUT_SCHEMAS[name];
 
 const NAME = "agentphone";
 // Single source of truth for the version: read it from package.json so the
@@ -149,6 +163,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   buy_number: { title: "Buy Phone Number", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   send_message: { title: "Send Message", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   get_messages: { title: "Get Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  watch_messages: { title: "Watch for Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_calls: { title: "List Calls", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   end_call: { title: "End Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -249,10 +264,13 @@ async function startStdio(): Promise<void> {
         annotations,
       };
       if (title) config.title = title;
-      if (OUTPUT_SCHEMAS[name]) config.outputSchema = OUTPUT_SCHEMAS[name];
+      const outputSchema = outputSchemaFor(name);
+      if (outputSchema) config.outputSchema = outputSchema;
       (server as any).registerTool(name, config, handler);
     },
   };
+  // No Wakeshift over stdio: its wakes come from the AgentPhone backend, which
+  // can't reach a process on the user's machine.
   registerTools(stdioRegistrar, api);
   await server.connect(new StdioServerTransport());
 }
@@ -520,6 +538,42 @@ async function startHttp(): Promise<void> {
     }
     return c.json(buildManifest(origin));
   };
+  // Wakeshift: the AgentPhone backend reports each inbound message here, signed
+  // with AGENTPHONE_EVENTS_SECRET, and this server emits message.received.
+  // Everything Wakeshift does (this route, watch_messages, attach) is on only
+  // with both the secret and WAKESHIFT_KEY set. See docs/backend-events.md.
+  const eventsSecret = process.env.AGENTPHONE_EVENTS_SECRET?.trim();
+  const wakeshiftOn = Boolean(eventsSecret) && wake.enabled;
+  if (eventsSecret && !wake.enabled) {
+    console.error("AGENTPHONE_EVENTS_SECRET is set but WAKESHIFT_KEY is not; Wakeshift is off.");
+  } else if (wake.enabled && !eventsSecret) {
+    console.error("WAKESHIFT_KEY is set but AGENTPHONE_EVENTS_SECRET is not; Wakeshift is off (watch_messages needs backend events).");
+  }
+  if (wakeshiftOn) {
+    const key = signingKey(eventsSecret!); // throws at startup on a malformed secret
+    server.app.post(
+      MESSAGE_RECEIVED_PATH,
+      bodyLimit({
+        maxSize: MAX_EVENT_BODY_BYTES,
+        onError: (c: any) => c.json({ error: "body_too_large" }, 413),
+      }),
+      async (c: any) => {
+        const result = await handleMessageReceived(
+          key,
+          {
+            id: c.req.header("webhook-id"),
+            timestamp: c.req.header("webhook-timestamp"),
+            signature: c.req.header("webhook-signature"),
+          },
+          await c.req.text(),
+          emitMessageReceived
+        );
+        return result.body ? c.json(result.body, result.status) : c.body(null, result.status);
+      }
+    );
+    console.error(`Wakeshift on: backend events at POST ${MESSAGE_RECEIVED_PATH}; watch_messages offered.`);
+  }
+
   server.app.get("/.well-known/mcp.json", serveManifest);
   server.app.get("/mcp.json", serveManifest);
 
@@ -551,7 +605,7 @@ async function startHttp(): Promise<void> {
           description,
           schema: z.object(schema ?? {}),
           annotations: annotations as Record<string, unknown>,
-          ...(OUTPUT_SCHEMAS[name] ? { outputSchema: OUTPUT_SCHEMAS[name] } : {}),
+          ...(outputSchemaFor(name) ? { outputSchema: outputSchemaFor(name) } : {}),
         },
         async (params: unknown, ctx: any) => {
           const header = authorizationHeader();
@@ -578,7 +632,33 @@ async function startHttp(): Promise<void> {
     },
   };
 
-  registerTools(registrar, api);
+  registerTools(registrar, api, { watchMessages: wakeshiftOn });
+
+  if (wakeshiftOn) {
+    // mcp-use builds an MCP SDK McpServer for each session (and each stateless
+    // request); attach to each one it hands out.
+    const sessionServer = server.getServerForSession.bind(server);
+    server.getServerForSession = (sessionId?: string) => {
+      const mcp = sessionServer(sessionId);
+      wake.attach(mcp as any, { wrap: WAKESHIFT_WRAP });
+      return mcp;
+    };
+    // Protocol 2026-07-28 has no session. mcp-use answers a request without one
+    // statelessly, through its own /mcp handler and its own auth, when the
+    // request doesn't accept an event stream: this only rewrites that header.
+    // (attach is what teaches the MCP SDK 1.x that revision.)
+    server.app.use("/mcp", async (c: any, next: () => Promise<void>) => {
+      if (
+        c.req.method === "POST" &&
+        !c.req.header("mcp-session-id") &&
+        c.req.header("mcp-protocol-version") === "2026-07-28"
+      ) {
+        c.req.raw.headers.set("accept", "application/json");
+      }
+      await next();
+    });
+  }
+
   await server.listen(PORT);
   console.error(`AgentPhone MCP server listening on port ${PORT} (oauth ${oauthEnabled ? "on" : "off"})`);
 }
