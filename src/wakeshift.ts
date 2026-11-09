@@ -13,6 +13,7 @@
  * is sent to Wakeshift, and every tool behaves as it did before.
  */
 
+import { createHash } from "node:crypto";
 import { Wakeshift, encodeArgValue } from "@wakeshift/sdk";
 import { z } from "zod";
 
@@ -56,13 +57,20 @@ export type MessageReceived = {
 };
 
 /**
+ * The emit id for one message: a hash of the number and message IDs, so it
+ * has a fixed length (Wakeshift takes at most 200 characters) and two
+ * different messages never share one, however long their IDs are.
+ */
+export function messageEventId(numberId: string, messageId: string): string {
+  return "msg-" + createHash("sha256").update(`${numberId}\n${messageId}`).digest("hex");
+}
+
+/**
  * Emits one message.received. The id comes from the message, so a retried
  * report of the same message wakes once.
  */
 export function emitMessageReceived(m: MessageReceived) {
-  return messageReceived.emit(numberArg(m.number_id), m, {
-    id: `msg-${m.number_id}-${m.message_id}`.slice(0, 200),
-  });
+  return messageReceived.emit(numberArg(m.number_id), m, { id: messageEventId(m.number_id, m.message_id) });
 }
 
 /** Tools that subscribe, for attach's `wrap`. */

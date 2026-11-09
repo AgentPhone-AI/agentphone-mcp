@@ -163,7 +163,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   buy_number: { title: "Buy Phone Number", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   send_message: { title: "Send Message", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   get_messages: { title: "Get Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  watch_messages: { title: "Watch for Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  watch_messages: { title: "Watch for Messages", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   list_calls: { title: "List Calls", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   end_call: { title: "End Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
@@ -551,12 +551,17 @@ async function startHttp(): Promise<void> {
   }
   if (wakeshiftOn) {
     const key = signingKey(eventsSecret!); // throws at startup on a malformed secret
-    server.app.post(
+    // As middleware, like the /mcp limit, so it runs before the handler reads
+    // the body however the route itself is registered.
+    server.app.use(
       MESSAGE_RECEIVED_PATH,
       bodyLimit({
         maxSize: MAX_EVENT_BODY_BYTES,
         onError: (c: any) => c.json({ error: "body_too_large" }, 413),
-      }),
+      })
+    );
+    server.app.post(
+      MESSAGE_RECEIVED_PATH,
       async (c: any) => {
         const result = await handleMessageReceived(
           key,

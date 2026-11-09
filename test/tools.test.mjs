@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 import { registerTools } from "../dist/tools.js";
-import { AgentPhoneAPI } from "../dist/api.js";
+import { AgentPhoneAPI, ApiError } from "../dist/api.js";
+import { createToolCall, withCall } from "@wakeshift/sdk/testing";
+import { wake, messageEventId } from "../dist/wakeshift.js";
 
 /**
  * Handler-level tests. registerTools() is given a registrar that records each
@@ -395,4 +397,103 @@ test("list_webhook_deliveries preserves the supported project time filter", asyn
   assert.equal(result.isError, undefined, result.content[0].text);
   assert.deepEqual(seen, ["GET https://example.test/v1/webhooks/deliveries?limit=7&hours=24"]);
   assert.deepEqual(result.structuredContent, { data: [], total: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// watch_messages (Wakeshift): registration gate, access check, de-duplication,
+// output, and what it subscribes to. withCall records the subscriptions the
+// handler makes, without a key or a network.
+// ---------------------------------------------------------------------------
+
+function watchHarness(apiStub, opts = { watchMessages: true }) {
+  const tools = new Map();
+  const calls = [];
+  const api = new Proxy(apiStub, {
+    get(target, name) {
+      return async (...args) => {
+        calls.push({ name, args });
+        if (!(name in target)) throw new Error(`unexpected API call: ${String(name)}`);
+        return target[name](...args);
+      };
+    },
+  });
+  registerTools(
+    {
+      tool(name, description, schema, annotationsOrHandler, maybeHandler) {
+        const handler = typeof annotationsOrHandler === "function" ? annotationsOrHandler : maybeHandler;
+        const annotations = typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler;
+        tools.set(name, { schema, handler, annotations });
+      },
+    },
+    api,
+    opts
+  );
+  return {
+    calls,
+    has: (name) => tools.has(name),
+    annotations: (name) => tools.get(name).annotations,
+    // Runs the handler inside a stand-in Wakeshift call; returns its result and subscriptions.
+    call: async (name, args) => {
+      const t = tools.get(name);
+      const parsed = await z.object(t.schema).parseAsync(args);
+      const call = createToolCall({ tool: name });
+      const result = await withCall(wake, call, () => t.handler(parsed));
+      return { result, subscriptions: call.subscriptions.map((s) => s.args.number) };
+    },
+  };
+}
+
+const NUMBERS = {
+  num_a: { id: "num_a", phoneNumber: "+14155550001" },
+  num_b: { id: "num_b", phoneNumber: "+14155550002" },
+};
+const getNumber = async (id) => {
+  if (NUMBERS[id]) return NUMBERS[id];
+  throw new ApiError(404, "GET", `/v1/numbers/${id}`, "Number not found");
+};
+
+test("watch_messages is offered only with { watchMessages: true }", () => {
+  assert.equal(watchHarness({}, {}).has("watch_messages"), false);
+  assert.equal(watchHarness({}).has("watch_messages"), true);
+});
+
+test("watch_messages is not read-only (it creates subscriptions) but is idempotent", () => {
+  const a = watchHarness({}).annotations("watch_messages");
+  assert.equal(a.readOnlyHint, false);
+  assert.equal(a.idempotentHint, true);
+});
+
+test("watch_messages subscribes every number in one call, de-duplicated", async () => {
+  const h = watchHarness({ getNumber });
+  const { result, subscriptions } = await h.call("watch_messages", { number_ids: ["num_a", "num_b", "num_a"] });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(subscriptions, ["num_a", "num_b"]);
+  assert.deepEqual(result.structuredContent, {
+    watching: [
+      { number_id: "num_a", phone_number: "+14155550001" },
+      { number_id: "num_b", phone_number: "+14155550002" },
+    ],
+  });
+  assert.equal(h.calls.filter((c) => c.name === "getNumber").length, 2, "each number is checked once");
+});
+
+test("watch_messages subscribes nothing when the caller can't read one of the numbers", async () => {
+  const h = watchHarness({ getNumber });
+  const { result, subscriptions } = await h.call("watch_messages", { number_ids: ["num_a", "num_missing"] });
+  assert.equal(result.isError, true);
+  assert.deepEqual(subscriptions, [], "the access check runs before any subscribe");
+});
+
+test("watch_messages needs at least one number", async () => {
+  const h = watchHarness({ getNumber });
+  await assert.rejects(() => h.call("watch_messages", { number_ids: [] }));
+});
+
+test("message.received emit ids are fixed-length and distinct for long IDs", () => {
+  const long = "x".repeat(200);
+  const a = messageEventId(long, long + "a");
+  const b = messageEventId(long, long + "b");
+  assert.notEqual(a, b);
+  assert.ok(a.length <= 200 && b.length === a.length);
+  assert.equal(messageEventId("num_1", "msg_1"), messageEventId("num_1", "msg_1"), "same message, same id");
 });

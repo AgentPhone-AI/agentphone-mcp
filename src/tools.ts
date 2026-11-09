@@ -1099,7 +1099,8 @@ export function registerTools(
           .max(MAX_WATCHED_NUMBERS)
           .describe("The IDs of the numbers to watch, from list_numbers: one or several."),
       },
-      { readOnlyHint: true, idempotentHint: true },
+      // Not read-only: it creates or renews the conversation's subscriptions.
+      { readOnlyHint: false, idempotentHint: true },
       async ({ number_ids }) => {
         const ids = [...new Set(number_ids as string[])];
         try {
