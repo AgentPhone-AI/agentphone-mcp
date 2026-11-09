@@ -1106,14 +1106,9 @@ export function registerTools(
         try {
           // Confirms the caller can see every number before subscribing to any.
           const numbers = await Promise.all(ids.map((id) => api.getNumber(id)));
-          // Subscribe to all numbers in one batch, then check availability
-          // together. Whether this client can be woken at all is a property of
-          // the client, not of any one number, so the subscriptions stand or
-          // fall together; batching them avoids leaving some numbers watched
-          // after discovering the client can't be notified (Bugbot). One call,
-          // so every subscription belongs to the same conversation.
-          const subs = await Promise.all(ids.map((id) => watchNumber(id)));
-          for (const sub of subs) {
+          // One call, so every subscription belongs to the same conversation.
+          for (const id of ids) {
+            const sub = await watchNumber(id);
             if (sub.state === "unavailable") {
               return err(new Error(`This client can't be notified of new messages (${sub.reason}). Use get_messages to check for new messages.`));
             }
