@@ -136,6 +136,8 @@ The optional anonymous mode instead uses the configured server API key.
 | `AGENTPHONE_BASE_URL` | API base (default `https://api.agentphone.ai`) |
 | `AGENTPHONE_OAUTH_AUTHORIZE` | Override authorize/consent URL (default `https://agentphone.ai/oauth/authorize`) |
 | `AGENTPHONE_MCP_PUBLIC_URL` | Public base URL this server is reached at, advertised in the `/.well-known/mcp.json` install manifest (e.g. `https://mcp.agentphone.ai`). If unset, it's derived from the request. |
+| `WAKESHIFT_KEY` | Optional, HTTP only, with `AGENTPHONE_EVENTS_SECRET`. Turns on [Wakeshift](https://wakeshift.ai) wakes: adds `watch_messages`, which wakes the agent whenever a message arrives on any of the numbers it watches. Without both, the server runs exactly as before |
+| `AGENTPHONE_EVENTS_SECRET` | Optional, HTTP only, with `WAKESHIFT_KEY`. A Standard Webhooks secret (`whsec_…`) shared with the AgentPhone backend: turns on `POST /internal/events/message-received`, which the backend calls for each inbound message. See [docs/backend-events.md](docs/backend-events.md) |
 
 ## Support matrix
 
@@ -248,6 +250,8 @@ model that deliberately requests the secret.
 | `AGENTPHONE_ALLOW_ANONYMOUS` | No | Explicit HTTP server-key fallback; default off, ignored when OAuth is enabled. See the self-hosting warning above |
 | `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.ai`) |
 | `PORT` | No | Port for HTTP mode (defaults to `3000`; set with `PORT`) |
+| `WAKESHIFT_KEY` | No | HTTP only, with `AGENTPHONE_EVENTS_SECRET`. Wakeshift app key; adds `watch_messages`. Without both, nothing is sent to Wakeshift |
+| `AGENTPHONE_EVENTS_SECRET` | No | HTTP only, with `WAKESHIFT_KEY`. Signing secret for backend message notifications; see [docs/backend-events.md](docs/backend-events.md) |
 
 ## Development
 
