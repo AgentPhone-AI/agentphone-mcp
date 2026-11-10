@@ -216,3 +216,49 @@ console.log(res.status);
 
 `204` means the event was emitted. An agent that called `watch_messages` for
 that number wakes within seconds.
+
+## The watched-number filter: the MCP server registers watches
+
+Emitting for every inbound message is simple but wasteful once volume is high —
+most numbers aren't being watched at any moment. To let the backend emit only
+for numbers an agent is actually watching, the MCP server registers each watch
+with the backend.
+
+Whenever `watch_messages` creates or renews a Wakeshift subscription for a
+number, the server also sends:
+
+```http
+POST /internal/watches
+Content-Type: application/json
+webhook-id: <unique ID for this request>
+webhook-timestamp: <unix seconds>
+webhook-signature: v1,<base64 HMAC-SHA256 of `{id}.{timestamp}.{body}`>
+
+{ "number_id": "<number id, as list_numbers returns it>", "ttl_seconds": 86400 }
+```
+
+Signed with Standard Webhooks using the **same** `AGENTPHONE_EVENTS_SECRET` that
+signs inbound events (same key: base64-decode the part after `whsec_`). The
+backend tolerates 5 minutes of clock skew; the body is at most 4 KB. Sending
+`ttl_seconds: 0` drops a watch early. The server re-registers on every renewal,
+so a watch's expiry keeps sliding while an agent keeps calling `watch_messages`.
+
+Responses: `200 {"number_id","watched":true,"expires_at":"...Z"}`; `401` on a bad
+signature; `404` when the backend has no secret configured (treated as
+"filter not enabled"); `422` on a bad body.
+
+Registration is **best-effort**: a failure never fails `watch_messages`. Until
+the backend's `MCP_EVENTS_WATCHED_ONLY` is on, it emits for every number
+regardless, so a missed registration changes nothing; once it's on, a missed
+registration just means that number isn't woken until the next renewal.
+
+A Wakeshift subscription is an idle timeout that slides on each delivered
+message, but the backend watch expires on a wall clock `ttl_seconds` after it
+was registered. So the server also re-registers a number's watch when it emits
+a `message.received` for it (throttled to at most once per number per hour),
+sliding the backend expiry the same way the delivery slides the Wakeshift one.
+A number with steady traffic therefore stays watched on both sides; one that
+goes quiet for `ttl_seconds` expires on both. Without this, a busy number's
+backend watch could expire while its Wakeshift subscription was still alive,
+and emission would stop with no error and no reason to call `watch_messages`
+again.

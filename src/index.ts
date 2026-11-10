@@ -28,6 +28,7 @@ import {
   WAKESHIFT_WRAP,
   WAKESHIFT_OUTPUT_SCHEMAS,
   emitMessageReceived,
+  WATCH_TTL_SECONDS,
 } from "./wakeshift.js";
 import {
   MESSAGE_RECEIVED_PATH,
@@ -35,6 +36,7 @@ import {
   handleMessageReceived,
   signingKey,
 } from "./backend-events.js";
+import { makeWatchRegistrar, makeWatchRefresher, makeEmitAndRefresh, type WatchRegistrar } from "./backend-watches.js";
 
 const outputSchemaFor = (name: string) => OUTPUT_SCHEMAS[name] ?? WAKESHIFT_OUTPUT_SCHEMAS[name];
 
@@ -549,8 +551,19 @@ async function startHttp(): Promise<void> {
   } else if (wake.enabled && !eventsSecret) {
     console.error("WAKESHIFT_KEY is set but AGENTPHONE_EVENTS_SECRET is not; Wakeshift is off (watch_messages needs backend events).");
   }
+  // Registers watched numbers with the backend so, with the filter on, it only
+  // emits for numbers an agent is actually watching. Signed with the same key.
+  let watchRegistrar: WatchRegistrar | undefined;
   if (wakeshiftOn) {
     const key = signingKey(eventsSecret!); // throws at startup on a malformed secret
+    watchRegistrar = makeWatchRegistrar({ baseUrl: BASE_URL, key });
+    // Each delivered message slides the Wakeshift subscription's idle timeout;
+    // slide the backend watch with it so a busy number's watch never expires
+    // out from under a live subscription (throttled per number).
+    const refreshWatch = makeWatchRefresher(watchRegistrar, WATCH_TTL_SECONDS);
+    // Slide a number's backend watch on delivery, but only when the delivery
+    // reached a live Wakeshift subscription (see makeEmitAndRefresh).
+    const emitAndRefresh = makeEmitAndRefresh(emitMessageReceived, refreshWatch);
     // As middleware, like the /mcp limit, so it runs before the handler reads
     // the body however the route itself is registered.
     server.app.use(
@@ -571,7 +584,7 @@ async function startHttp(): Promise<void> {
             signature: c.req.header("webhook-signature"),
           },
           await c.req.text(),
-          emitMessageReceived
+          emitAndRefresh
         );
         return result.body ? c.json(result.body, result.status) : c.body(null, result.status);
       }
@@ -637,7 +650,7 @@ async function startHttp(): Promise<void> {
     },
   };
 
-  registerTools(registrar, api, { watchMessages: wakeshiftOn });
+  registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
 
   if (wakeshiftOn) {
     // mcp-use builds an MCP SDK McpServer for each session (and each stateless

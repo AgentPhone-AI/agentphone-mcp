@@ -6,7 +6,8 @@
 
 import { z } from "zod";
 import { AgentPhoneAPI, ApiError } from "./api.js";
-import { watchNumber, WATCH_TTL } from "./wakeshift.js";
+import { watchNumber, WATCH_TTL, WATCH_TTL_SECONDS } from "./wakeshift.js";
+import type { WatchRegistrar } from "./backend-watches.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -351,7 +352,7 @@ function buildCallControls(args: {
 export function registerTools(
   server: ToolRegistrar,
   api: AgentPhoneAPI,
-  opts: { watchMessages?: boolean } = {}
+  opts: { watchMessages?: boolean; registerWatch?: WatchRegistrar } = {}
 ): void {
   // ============================================================
   // Account Overview
@@ -1111,6 +1112,23 @@ export function registerTools(
             const sub = await watchNumber(id);
             if (sub.state === "unavailable") {
               return err(new Error(`This client can't be notified of new messages (${sub.reason}). Use get_messages to check for new messages.`));
+            }
+            // Best-effort: register (or renew) the watch with the backend so it
+            // keeps emitting message.received for this number. Detached, not
+            // awaited: a slow or down backend (each call up to the registrar's
+            // timeout) must never delay Wakeshift setup or the tool response,
+            // even for a 50-number call. 404 ("disabled") is expected until the
+            // filter is turned on; anything other than watched/disabled means
+            // this number may go unwoken until the next renewal.
+            if (opts.registerWatch) {
+              void opts
+                .registerWatch(id, WATCH_TTL_SECONDS)
+                .then((outcome) => {
+                  if (outcome !== "watched" && outcome !== "disabled") {
+                    console.error(`watch_messages: backend watch registration for ${id} returned "${outcome}"; messages may not wake the agent until it is renewed.`);
+                  }
+                })
+                .catch(() => {});
             }
           }
           const watching = ids.map((id, i) => ({ number_id: id, phone_number: numbers[i].phoneNumber }));
