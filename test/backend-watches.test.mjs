@@ -196,3 +196,37 @@ test("does not cancel a body it already read on a 2xx", async () => {
   assert.equal(result, "watched");
   assert.equal(cancelled, false, "a body consumed by json() is not cancelled again");
 });
+
+// ---------------------------------------------------------------------------
+// makeEmitAndRefresh: slide the watch only when the delivery reached a live
+// Wakeshift subscription, so unwatched numbers are never registered.
+// ---------------------------------------------------------------------------
+import { makeEmitAndRefresh } from "../dist/backend-watches.js";
+
+test("refreshes the watch when a delivery reached a subscription (matched > 0)", async () => {
+  const refreshed = [];
+  const wrapped = makeEmitAndRefresh(
+    async (b) => ({ matched: 2, number_id: b.number_id }),
+    (id) => refreshed.push(id)
+  );
+  const out = await wrapped({ number_id: "num_1" });
+  assert.equal(out.matched, 2);
+  assert.deepEqual(refreshed, ["num_1"]);
+});
+
+test("does NOT refresh when the delivery reached no subscription (matched === 0)", async () => {
+  const refreshed = [];
+  const wrapped = makeEmitAndRefresh(
+    async (b) => ({ matched: 0, number_id: b.number_id }),
+    (id) => refreshed.push(id)
+  );
+  const out = await wrapped({ number_id: "num_unwatched" });
+  assert.equal(out.matched, 0);
+  assert.deepEqual(refreshed, [], "an unwatched number must not be registered");
+});
+
+test("returns the emit result unchanged (still a valid emit callback)", async () => {
+  const emitted = { matched: 1, duplicate: false, number_id: "num_1" };
+  const wrapped = makeEmitAndRefresh(async () => emitted, () => {});
+  assert.equal(await wrapped({ number_id: "num_1" }), emitted);
+});

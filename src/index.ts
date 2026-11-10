@@ -36,7 +36,7 @@ import {
   handleMessageReceived,
   signingKey,
 } from "./backend-events.js";
-import { makeWatchRegistrar, makeWatchRefresher, type WatchRegistrar } from "./backend-watches.js";
+import { makeWatchRegistrar, makeWatchRefresher, makeEmitAndRefresh, type WatchRegistrar } from "./backend-watches.js";
 
 const outputSchemaFor = (name: string) => OUTPUT_SCHEMAS[name] ?? WAKESHIFT_OUTPUT_SCHEMAS[name];
 
@@ -561,11 +561,9 @@ async function startHttp(): Promise<void> {
     // slide the backend watch with it so a busy number's watch never expires
     // out from under a live subscription (throttled per number).
     const refreshWatch = makeWatchRefresher(watchRegistrar, WATCH_TTL_SECONDS);
-    const emitAndRefresh = async (body: { number_id: string; message_id: string; from: string | null; received_at: string }) => {
-      const out = await emitMessageReceived(body);
-      refreshWatch(body.number_id);
-      return out;
-    };
+    // Slide a number's backend watch on delivery, but only when the delivery
+    // reached a live Wakeshift subscription (see makeEmitAndRefresh).
+    const emitAndRefresh = makeEmitAndRefresh(emitMessageReceived, refreshWatch);
     // As middleware, like the /mcp limit, so it runs before the handler reads
     // the body however the route itself is registered.
     server.app.use(
