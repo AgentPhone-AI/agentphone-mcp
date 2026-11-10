@@ -42,24 +42,6 @@ export type WatchRegistrar = (numberId: string, ttlSeconds: number) => Promise<R
  * so a high-traffic number doesn't POST on every message. Best-effort and
  * synchronous to the caller: it never throws and never blocks the emit path.
  */
-/**
- * Wraps the Wakeshift emit so a delivery that reaches a live subscription also
- * slides that number's backend watch. A delivery that reached no subscription
- * (`matched === 0`) is left alone, so a number no agent is watching is never
- * registered — which keeps the watched-only filter honest. Wakeshift's
- * `matched` is the source of truth, so no in-process watch tracking is needed.
- */
-export function makeEmitAndRefresh<T extends { number_id: string }, R extends { matched: number }>(
-  emit: (body: T) => Promise<R>,
-  refresh: (numberId: string) => void
-): (body: T) => Promise<R> {
-  return async (body: T): Promise<R> => {
-    const emitted = await emit(body);
-    if (emitted.matched > 0) refresh(body.number_id);
-    return emitted;
-  };
-}
-
 export function makeWatchRefresher(
   register: WatchRegistrar,
   ttlSeconds: number,
@@ -87,6 +69,24 @@ export function makeWatchRefresher(
         }
       })
       .catch(() => {});
+  };
+}
+
+/**
+ * Wraps the Wakeshift emit so a delivery that reaches a live subscription also
+ * slides that number's backend watch. A delivery that reached no subscription
+ * (`matched === 0`) is left alone, so a number no agent is watching is never
+ * registered — which keeps the watched-only filter honest. Wakeshift's
+ * `matched` is the source of truth, so no in-process watch tracking is needed.
+ */
+export function makeEmitAndRefresh<T extends { number_id: string }, R extends { matched: number }>(
+  emit: (body: T) => Promise<R>,
+  refresh: (numberId: string) => void
+): (body: T) => Promise<R> {
+  return async (body: T): Promise<R> => {
+    const emitted = await emit(body);
+    if (emitted.matched > 0) refresh(body.number_id);
+    return emitted;
   };
 }
 
