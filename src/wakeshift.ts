@@ -24,6 +24,13 @@ type NumberArgs = { number: string };
 /** A watch ends after this long with no message delivered and no renewal (calling watch_messages again). */
 export const WATCH_TTL = "24h";
 
+/**
+ * WATCH_TTL in seconds, for the backend watch registration. Kept in step with
+ * WATCH_TTL so the backend keeps emitting for a number at least as long as the
+ * Wakeshift subscription that would wake on it lives.
+ */
+export const WATCH_TTL_SECONDS = 24 * 60 * 60;
+
 export const messageReceived = wake.defineEvent("message.received", {
   description: "A message arrived on one of your AgentPhone numbers",
   args: z.object({ number: z.string() }),

@@ -497,3 +497,40 @@ test("message.received emit ids are fixed-length and distinct for long IDs", () 
   assert.ok(a.length <= 200 && b.length === a.length);
   assert.equal(messageEventId("num_1", "msg_1"), messageEventId("num_1", "msg_1"), "same message, same id");
 });
+
+// ---------------------------------------------------------------------------
+// watch_messages backend registration (/internal/watches): best-effort, called
+// once per watched number, and a failure never fails the tool.
+// ---------------------------------------------------------------------------
+
+const WATCH_TTL_SECONDS = 24 * 60 * 60;
+
+test("watch_messages registers each watched number with the backend", async () => {
+  const seen = [];
+  const h = watchHarness({ getNumber }, {
+    watchMessages: true,
+    registerWatch: async (numberId, ttl) => {
+      seen.push([numberId, ttl]);
+      return "watched";
+    },
+  });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a", "num_b", "num_a"] });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(seen, [["num_a", WATCH_TTL_SECONDS], ["num_b", WATCH_TTL_SECONDS]]);
+});
+
+test("a failing backend registration does not fail watch_messages", async () => {
+  const h = watchHarness({ getNumber }, {
+    watchMessages: true,
+    registerWatch: async () => "error",
+  });
+  const { result, subscriptions } = await h.call("watch_messages", { number_ids: ["num_a"] });
+  assert.equal(result.isError, undefined, "tool still succeeds");
+  assert.deepEqual(subscriptions, ["num_a"], "the Wakeshift subscription still happened");
+});
+
+test("watch_messages works when no registrar is wired (registration optional)", async () => {
+  const h = watchHarness({ getNumber }, { watchMessages: true });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a"] });
+  assert.equal(result.isError, undefined);
+});

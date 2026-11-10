@@ -35,6 +35,7 @@ import {
   handleMessageReceived,
   signingKey,
 } from "./backend-events.js";
+import { makeWatchRegistrar, type WatchRegistrar } from "./backend-watches.js";
 
 const outputSchemaFor = (name: string) => OUTPUT_SCHEMAS[name] ?? WAKESHIFT_OUTPUT_SCHEMAS[name];
 
@@ -549,8 +550,12 @@ async function startHttp(): Promise<void> {
   } else if (wake.enabled && !eventsSecret) {
     console.error("WAKESHIFT_KEY is set but AGENTPHONE_EVENTS_SECRET is not; Wakeshift is off (watch_messages needs backend events).");
   }
+  // Registers watched numbers with the backend so, with the filter on, it only
+  // emits for numbers an agent is actually watching. Signed with the same key.
+  let watchRegistrar: WatchRegistrar | undefined;
   if (wakeshiftOn) {
     const key = signingKey(eventsSecret!); // throws at startup on a malformed secret
+    watchRegistrar = makeWatchRegistrar({ baseUrl: BASE_URL, key });
     // As middleware, like the /mcp limit, so it runs before the handler reads
     // the body however the route itself is registered.
     server.app.use(
@@ -637,7 +642,7 @@ async function startHttp(): Promise<void> {
     },
   };
 
-  registerTools(registrar, api, { watchMessages: wakeshiftOn });
+  registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
 
   if (wakeshiftOn) {
     // mcp-use builds an MCP SDK McpServer for each session (and each stateless
