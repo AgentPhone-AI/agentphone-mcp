@@ -166,3 +166,33 @@ test("refresher never throws even if the registrar rejects", () => {
   const refresh = makeWatchRefresher(async () => { throw new Error("boom"); }, 86400, 60_000);
   assert.doesNotThrow(() => refresh("num_1"));
 });
+
+test("drains the response body on a non-2xx path so the socket is freed", async () => {
+  let cancelled = false;
+  const replyWithBody = (status) => ({
+    status,
+    ok: status >= 200 && status < 300,
+    bodyUsed: false,
+    body: { cancel: async () => { cancelled = true; } },
+    json: async () => ({}),
+  });
+  const reg = makeWatchRegistrar({ baseUrl: BASE, key: KEY });
+  const { result } = await withFetch(() => replyWithBody(404), () => reg("num_1", 900));
+  assert.equal(result, "disabled");
+  assert.equal(cancelled, true, "the unread 404 body must be cancelled");
+});
+
+test("does not cancel a body it already read on a 2xx", async () => {
+  let cancelled = false;
+  const reg = makeWatchRegistrar({ baseUrl: BASE, key: KEY });
+  const okWithBody = {
+    status: 200,
+    ok: true,
+    bodyUsed: false,
+    body: { cancel: async () => { cancelled = true; } },
+    json: async function () { this.bodyUsed = true; return { watched: true }; },
+  };
+  const { result } = await withFetch(() => okWithBody, () => reg("num_1", 900));
+  assert.equal(result, "watched");
+  assert.equal(cancelled, false, "a body consumed by json() is not cancelled again");
+});

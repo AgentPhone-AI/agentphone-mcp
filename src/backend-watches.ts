@@ -89,20 +89,35 @@ export function makeWatchRegistrar(opts: { baseUrl: string; key: Buffer }): Watc
         body,
         signal: controller.signal,
       });
-      if (res.status === 404) return "disabled";
-      if (res.status === 401 || res.status === 422) return "rejected";
-      if (!res.ok) return "error";
-      // 2xx: watched unless the backend says otherwise (e.g. a ttl_seconds=0 drop).
-      let watched = true;
       try {
-        const parsed = (await res.json()) as { watched?: unknown };
-        if (typeof parsed?.watched === "boolean") watched = parsed.watched;
-      } catch {
-        // A 2xx without a JSON body still counts as registered.
+        if (res.status === 404) return "disabled";
+        if (res.status === 401 || res.status === 422) return "rejected";
+        if (!res.ok) return "error";
+        // 2xx: watched unless the backend says otherwise (e.g. a ttl_seconds=0 drop).
+        let watched = true;
+        try {
+          const parsed = (await res.json()) as { watched?: unknown };
+          if (typeof parsed?.watched === "boolean") watched = parsed.watched;
+        } catch {
+          // A 2xx without a JSON body still counts as registered.
+        }
+        return watched ? "watched" : "not_watched";
+      } finally {
+        // Drain the body on the paths that returned without reading it (the
+        // 404 path is hit on every call until the filter is on), so the
+        // connection can be reused instead of the socket staying busy.
+        if (res.body && !res.bodyUsed) {
+          try {
+            await res.body.cancel();
+          } catch {
+            // Already consumed or closed: nothing to release.
+          }
+        }
       }
-      return watched ? "watched" : "not_watched";
-    } catch {
-      // Network error, timeout, or abort: best-effort, so swallow it.
+    } catch (err) {
+      // Network error, timeout, or abort: best-effort, so don't propagate, but
+      // leave a trace (name only) so suppressed wakes are diagnosable.
+      console.error("watch registration failed:", err instanceof Error ? err.name : typeof err);
       return "error";
     } finally {
       clearTimeout(timer);
