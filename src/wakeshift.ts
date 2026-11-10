@@ -25,9 +25,11 @@ type NumberArgs = { number: string };
 export const WATCH_TTL = "24h";
 
 /**
- * WATCH_TTL in seconds, for the backend watch registration. Kept in step with
- * WATCH_TTL so the backend keeps emitting for a number at least as long as the
- * Wakeshift subscription that would wake on it lives.
+ * WATCH_TTL in seconds, for the backend watch registration. The backend watch
+ * expires on a wall clock, while the Wakeshift subscription is an idle timeout
+ * that slides on each delivered message, so the backend watch is re-registered
+ * on every delivery too (see makeWatchRefresher); with both sliding on the same
+ * events, the backend keeps emitting as long as the subscription lives.
  */
 export const WATCH_TTL_SECONDS = 24 * 60 * 60;
 

@@ -31,6 +31,41 @@ export type RegisterWatchOutcome =
 export type WatchRegistrar = (numberId: string, ttlSeconds: number) => Promise<RegisterWatchOutcome>;
 
 /**
+ * A backend watch expires on a wall clock, but the Wakeshift subscription it
+ * backs is an idle timeout that slides on every delivered message — so a busy
+ * number can stay subscribed in Wakeshift long after its backend watch would
+ * expire, and (with the filter on) silently stop being emitted for. This wraps
+ * a registrar to re-register a number's watch when a message is delivered for
+ * it, sliding its expiry the same way, so the two clocks stay together.
+ *
+ * Throttled to at most once per number per `minIntervalMs` (far under the TTL)
+ * so a high-traffic number doesn't POST on every message. Best-effort and
+ * synchronous to the caller: it never throws and never blocks the emit path.
+ */
+export function makeWatchRefresher(
+  register: WatchRegistrar,
+  ttlSeconds: number,
+  minIntervalMs = 60 * 60 * 1000
+): (numberId: string) => void {
+  const lastSlid = new Map<string, number>();
+  return (numberId: string): void => {
+    const now = Date.now();
+    const prev = lastSlid.get(numberId);
+    if (prev !== undefined && now - prev < minIntervalMs) return;
+    lastSlid.set(numberId, now);
+    // Drop entries that can't still be backing a live watch, so the map stays
+    // bounded by the numbers watched within one TTL rather than growing forever.
+    if (lastSlid.size > 10000) {
+      const cutoff = now - ttlSeconds * 1000;
+      for (const [id, at] of lastSlid) if (at < cutoff) lastSlid.delete(id);
+    }
+    // register never throws, but swallow a rejection defensively so a caller's
+    // registrar can't leak an unhandled rejection from this fire-and-forget.
+    register(numberId, ttlSeconds).catch(() => {});
+  };
+}
+
+/**
  * Builds a registrar bound to one backend and signing key. The returned
  * function never throws: callers can fire it without a try/catch.
  */

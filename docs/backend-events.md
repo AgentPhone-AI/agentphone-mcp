@@ -251,3 +251,14 @@ Registration is **best-effort**: a failure never fails `watch_messages`. Until
 the backend's `MCP_EVENTS_WATCHED_ONLY` is on, it emits for every number
 regardless, so a missed registration changes nothing; once it's on, a missed
 registration just means that number isn't woken until the next renewal.
+
+A Wakeshift subscription is an idle timeout that slides on each delivered
+message, but the backend watch expires on a wall clock `ttl_seconds` after it
+was registered. So the server also re-registers a number's watch when it emits
+a `message.received` for it (throttled to at most once per number per hour),
+sliding the backend expiry the same way the delivery slides the Wakeshift one.
+A number with steady traffic therefore stays watched on both sides; one that
+goes quiet for `ttl_seconds` expires on both. Without this, a busy number's
+backend watch could expire while its Wakeshift subscription was still alive,
+and emission would stop with no error and no reason to call `watch_messages`
+again.

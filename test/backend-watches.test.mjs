@@ -117,3 +117,52 @@ test("a trailing slash on the base URL is not doubled", async () => {
   const { captured } = await withFetch(() => reply(200, { watched: true }), () => reg("num_1", 900));
   assert.equal(captured[0].url, `${BASE}${WATCH_REGISTER_PATH}`);
 });
+
+// ---------------------------------------------------------------------------
+// makeWatchRefresher: slides a watch on delivery, mirroring Wakeshift's idle
+// timeout, throttled per number so a busy number doesn't POST on every message.
+// ---------------------------------------------------------------------------
+import { makeWatchRefresher } from "../dist/backend-watches.js";
+
+test("refresher re-registers on first delivery for a number", async () => {
+  const calls = [];
+  const refresh = makeWatchRefresher(async (id, ttl) => { calls.push([id, ttl]); return "watched"; }, 86400, 60_000);
+  refresh("num_1");
+  await Promise.resolve();
+  assert.deepEqual(calls, [["num_1", 86400]]);
+});
+
+test("refresher throttles repeat deliveries within the interval, then slides again after it", async () => {
+  const calls = [];
+  const refresh = makeWatchRefresher(async (id) => { calls.push(id); return "watched"; }, 86400, 60_000);
+  let now = 1_000_000;
+  const realNow = Date.now;
+  Date.now = () => now;
+  try {
+    refresh("num_1");            // slides
+    refresh("num_1");            // throttled
+    now += 30_000;
+    refresh("num_1");            // still within 60s window -> throttled
+    now += 31_000;               // now 61s since first slide
+    refresh("num_1");            // slides again
+    await Promise.resolve();
+  } finally {
+    Date.now = realNow;
+  }
+  assert.deepEqual(calls, ["num_1", "num_1"]);
+});
+
+test("refresher throttles per number independently", async () => {
+  const calls = [];
+  const refresh = makeWatchRefresher(async (id) => { calls.push(id); return "watched"; }, 86400, 60_000);
+  refresh("num_1");
+  refresh("num_2");
+  refresh("num_1"); // throttled
+  await Promise.resolve();
+  assert.deepEqual(calls.sort(), ["num_1", "num_2"]);
+});
+
+test("refresher never throws even if the registrar rejects", () => {
+  const refresh = makeWatchRefresher(async () => { throw new Error("boom"); }, 86400, 60_000);
+  assert.doesNotThrow(() => refresh("num_1"));
+});
