@@ -2160,19 +2160,22 @@ export function registerTools(
 
   server.tool(
     "manage_contact",
-    "Create or update a saved contact. Set `action` to choose the operation.\n\n" +
+    "Create, update, or delete a saved contact. Set `action` to choose the operation.\n\n" +
       "- create: requires phone_number and name\n" +
-      "- update: requires contact_id; only the fields you pass are changed\n\n" +
-      "Both return the saved contact (id, name, phone number, email, notes). To permanently " +
-      "remove a contact, use the separate delete_contact tool.",
+      "- update: requires contact_id; only the fields you pass are changed\n" +
+      "- delete: requires contact_id, and confirm=true — permanent and cannot be undone. Without " +
+      "confirm the tool deletes nothing and returns a preview of what would be removed, so the user " +
+      "can approve first.\n\n" +
+      "create and update return the saved contact (id, name, phone number, email, notes); delete " +
+      "returns a success flag.",
     {
       action: z
-        .enum(["create", "update"])
-        .describe("Which operation to run: create a new contact, or update an existing one."),
+        .enum(["create", "update", "delete"])
+        .describe("Which operation to run: create a new contact, update an existing one, or delete one (delete is permanent and needs confirm=true)."),
       contact_id: z
         .string()
         .optional()
-        .describe("ID of the contact to update, from list_contacts. Required for 'update'."),
+        .describe("ID of the contact to act on, from list_contacts. Required for 'update' and 'delete'."),
       phone_number: z
         .string()
         .optional()
@@ -2180,9 +2183,17 @@ export function registerTools(
       name: z.string().optional().describe("Contact name. Required for 'create'."),
       email: z.string().email().optional().describe("An email address to save with the contact."),
       notes: z.string().optional().describe("Freeform notes to store with the contact, for your reference."),
+      confirm: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Required for action='delete': must be true to actually delete. When false (the default), " +
+            "a delete only previews what would be removed and deletes nothing. Ignored for create and " +
+            "update. Get the user's explicit go-ahead, then call again with the same arguments plus confirm=true."
+        ),
     },
-    { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
-    async ({ action, contact_id, phone_number, name, email, notes }) => {
+    { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
+    async ({ action, contact_id, phone_number, name, email, notes, confirm }) => {
       if (phone_number) {
         const phoneErr = validateE164(phone_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -2196,49 +2207,24 @@ export function registerTools(
           return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
         }
 
-        // action === "update"
-        if (!contact_id) return err(new Error("update requires contact_id."));
-        const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
-        if (phone_number !== undefined) params.phoneNumber = phone_number;
-        if (name !== undefined) params.name = name;
-        if (email !== undefined) params.email = email;
-        if (notes !== undefined) params.notes = notes;
-        const result = await api.updateContact(contact_id, params);
-        return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
+        if (action === "update") {
+          if (!contact_id) return err(new Error("update requires contact_id."));
+          const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
+          if (phone_number !== undefined) params.phoneNumber = phone_number;
+          if (name !== undefined) params.name = name;
+          if (email !== undefined) params.email = email;
+          if (notes !== undefined) params.notes = notes;
+          const result = await api.updateContact(contact_id, params);
+          return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
+        }
 
-  server.tool(
-    "delete_contact",
-    "Permanently delete a saved contact. This cannot be undone — the contact and its saved name, " +
-      "phone number, email, and notes are removed. This is the only tool that deletes a contact; " +
-      "creating and updating are in manage_contact.\n\n" +
-      "Deleting requires confirm=true. When confirm is false (the default), the tool deletes nothing " +
-      "and returns a preview of the contact that would be removed, so the user can approve first.",
-    {
-      contact_id: z
-        .string()
-        .describe("ID of the contact to permanently delete, from list_contacts."),
-      confirm: z
-        .boolean()
-        .default(false)
-        .describe(
-          "Must be true to actually delete the contact. When false (the default), the tool deletes " +
-            "nothing and returns a preview. Get the user's explicit go-ahead, then call again with the " +
-            "same contact_id plus confirm=true."
-        ),
-    },
-    { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
-    async ({ contact_id, confirm }) => {
-      try {
+        // action === "delete" — permanent, so gated behind an explicit confirm.
+        if (!contact_id) return err(new Error("delete requires contact_id."));
         if (!confirm) {
           return ok(
             `This will PERMANENTLY delete contact ${contact_id} (its saved name, phone number, email, ` +
-              "and notes). This cannot be undone.\n\nConfirm with the user first, then call delete_contact " +
-              "again with the SAME contact_id plus confirm=true. Use list_contacts to review the contact beforehand.",
+              "and notes). This cannot be undone.\n\nConfirm with the user first, then call manage_contact " +
+              "again with action='delete', the SAME contact_id, plus confirm=true. Use list_contacts to review it beforehand.",
             { confirmationRequired: true }
           );
         }

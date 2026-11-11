@@ -199,8 +199,7 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `list_contacts` | List saved contacts (address book). Filter with a `search` term. |
-| `manage_contact` | Create or update a contact (set `action`) |
-| `delete_contact` | Permanently delete a contact. **Requires `confirm=true`** (previews first; cannot be undone) |
+| `manage_contact` | Create, update, or delete a contact (set `action`). Delete **requires `confirm=true`** (previews first; cannot be undone) |
 
 ### Voice Calls
 

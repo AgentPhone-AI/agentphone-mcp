@@ -93,8 +93,8 @@ const INSTRUCTIONS = [
     "directly through the AgentPhone API or SDKs bypass it.",
   "",
   "Billing and irreversible actions: buy_number, calls, and messages are billed per use. " +
-    "delete_agent and delete_contact cannot be undone (delete_contact needs confirm=true). Deleting " +
-    "a webhook is reversible — set_webhook restores it.",
+    "delete_agent and manage_contact with action=delete cannot be undone (delete needs confirm=true). " +
+    "Deleting a webhook is reversible — set_webhook restores it.",
   "",
   "Use IDs returned by account_overview, create_agent, buy_number, or the relevant list_* tools " +
     "before calling anything that takes an agent_id, number_id, conversation_id, or call_id.",
@@ -149,7 +149,7 @@ if (httpMode) {
 //                     guidance, overwrite counts; reversibility alone is not
 //                     enough). So: sends/transactions that can't be undone
 //                     (buy_number, send_message, calls); deletes (delete_agent,
-//                     delete_webhook, delete_contact);
+//                     delete_webhook, manage_contact, which can delete);
 //                     update_conversation (metadata:null clears data);
 //                     update_agent (overwrites config, can clear transfer/
 //                     voicemail); and set_webhook (replaces the configured
@@ -186,8 +186,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_conversation_messages: { title: "Get Conversation Messages", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   update_conversation: { title: "Update Conversation", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   list_contacts: { title: "List Contacts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  manage_contact: { title: "Create or Update Contact", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  delete_contact: { title: "Delete Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  manage_contact: { title: "Manage Contact", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   get_usage: { title: "Get Usage", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   get_webhook: { title: "Get Webhook", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   set_webhook: { title: "Set Webhook", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
