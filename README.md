@@ -199,7 +199,8 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `list_contacts` | List saved contacts (address book). Filter with a `search` term. |
-| `manage_contact` | Create, update, or delete a contact (set `action`) |
+| `manage_contact` | Create or update a contact (set `action`) |
+| `delete_contact` | Permanently delete a contact. **Requires `confirm=true`** (previews first; cannot be undone) |
 
 ### Voice Calls
 
@@ -236,11 +237,9 @@ All webhook tools accept an optional `agent_id` — pass it to manage an agent-s
 | `test_webhook` | Send a test event to verify your webhook works |
 | `list_webhook_deliveries` | View delivery history for debugging |
 
-`get_webhook` and `set_webhook` mask signing secrets by default, for both scopes.
-Retrieve the secret from the dashboard when possible. Passing `reveal_secret: true`
-includes it in tool output, exposing it to model context, transcripts and client logs.
-This prevents accidental disclosure; it is not an authorization boundary against a
-model that deliberately requests the secret.
+`get_webhook` and `set_webhook` never return the signing secret, for either scope —
+it is always masked, so it can't land in model context, transcripts, or client logs.
+Retrieve the secret from the AgentPhone dashboard to verify webhook signatures.
 
 ## Environment Variables
 

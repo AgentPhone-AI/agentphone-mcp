@@ -124,6 +124,7 @@ const ARGS = {
   update_conversation: { conversation_id: "conv_1", metadata: { a: 1 } },
   list_contacts: {},
   manage_contact: { action: "create", phone_number: "+14155550123", name: "Jo" },
+  delete_contact: { contact_id: "ct_1", confirm: true },
   get_usage: {},
   get_webhook: {},
   set_webhook: { url: "https://example.com/hook" },
@@ -736,7 +737,7 @@ test("hosted agents get an enforced AI disclosure on create and update (director
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 32);
+  assert.equal(registered.size, 33);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -860,31 +861,42 @@ test("account_overview reports section status on partial failure (#190)", async 
   assert.equal(r.structuredContent.sectionStatus.agents, "ok");
 });
 
-test("webhook tools mask the signing secret in structuredContent by default", async () => {
+test("webhook tools always mask the signing secret in structuredContent", async () => {
   const h = harness(makeStub());
   for (const [name, args] of [["get_webhook", {}], ["set_webhook", { url: "https://example.com/hook" }]]) {
     const r = await h.call(name, args);
     assert.ok(OUTPUT_SCHEMAS[name].safeParse(r.structuredContent).success, name);
     assert.doesNotMatch(r.structuredContent.secret, /realish/, `${name} leaked the secret in structuredContent`);
-    assert.match(r.structuredContent.secret, /masked/, `${name} should mask the secret`);
+    assert.match(r.structuredContent.secret, /hidden/, `${name} should mask the secret`);
   }
 });
 
-test("webhook structuredContent includes the real secret only with reveal_secret=true", async () => {
+test("get_webhook never returns the real secret, even if reveal_secret is passed", async () => {
   const h = harness(makeStub());
   const r = await h.call("get_webhook", { reveal_secret: true });
-  assert.equal(r.structuredContent.secret, "whsec_realish");
+  assert.notEqual(r.structuredContent.secret, "whsec_realish");
+  assert.match(r.structuredContent.secret, /hidden/);
 });
 
-test("manage_contact update and delete validate (delete passes the real success value)", async () => {
+test("manage_contact create and update validate", async () => {
   const h = harness(makeStub());
   const upd = await h.call("manage_contact", { action: "update", contact_id: "ct_1", name: "Jo2" });
   assert.equal(upd.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(upd.structuredContent).success);
-  const del = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
+});
+
+test("delete_contact previews without confirm, deletes with confirm", async () => {
+  const h = harness(makeStub());
+  const preview = await h.call("delete_contact", { contact_id: "ct_1" });
+  assert.equal(preview.isError, undefined);
+  assert.equal(preview.structuredContent.confirmationRequired, true);
+  assert.equal(preview.structuredContent.success, undefined, "nothing deleted on a preview");
+  assert.ok(OUTPUT_SCHEMAS.delete_contact.safeParse(preview.structuredContent).success);
+
+  const del = await h.call("delete_contact", { contact_id: "ct_1", confirm: true });
   assert.equal(del.isError, undefined);
-  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(del.structuredContent).success);
   assert.equal(del.structuredContent.success, true);
+  assert.ok(OUTPUT_SCHEMAS.delete_contact.safeParse(del.structuredContent).success);
 });
 
 // Regression for #93 at the handler layer: a DELETE that comes back as {} (a
@@ -896,9 +908,9 @@ test("delete-style tools tolerate an empty ({}) API result (#93)", async () => {
   assert.ok(OUTPUT_SCHEMAS.detach_number.safeParse(d.structuredContent).success, "detach_number tolerates {}");
   assert.equal(d.structuredContent.success, true);
 
-  const c = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
-  assert.equal(c.isError, undefined, "manage_contact delete should not error on {}");
-  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(c.structuredContent).success, "manage_contact delete tolerates {}");
+  const c = await h.call("delete_contact", { contact_id: "ct_1", confirm: true });
+  assert.equal(c.isError, undefined, "delete_contact should not error on {}");
+  assert.ok(OUTPUT_SCHEMAS.delete_contact.safeParse(c.structuredContent).success, "delete_contact tolerates {}");
 });
 
 // There is no structured-content fallback: every success path must return its

@@ -1,7 +1,7 @@
 /**
  * AgentPhone MCP Tool Registrations
  *
- * 32 MCP tools with ToolAnnotations, input validation, and actionable errors.
+ * MCP tools with ToolAnnotations, input validation, and actionable errors.
  */
 
 import { z } from "zod";
@@ -42,14 +42,15 @@ export interface ToolRegistrar {
 /**
  * Webhook signing secrets only exist to verify signatures on the receiving
  * server. Tool output lands in model context, chat transcripts and client logs,
- * so by default we preserve only its conventional type prefix.
+ * so a signing secret is never returned through a tool: it is always masked to
+ * its conventional type prefix, and the full value lives only in the dashboard.
  */
 function maskSecret(secret: string): string {
   if (!secret) return secret;
   // Preserve only the conventional, non-secret type prefix. Never expose
   // arbitrary secret bytes or its length, including for short secrets.
   const prefix = secret.startsWith("whsec_") && secret.length > 6 ? "whsec_" : "";
-  return `${prefix}•••••• (masked; pass reveal_secret=true to show it)`;
+  return `${prefix}•••••• (hidden; retrieve it from the AgentPhone dashboard)`;
 }
 
 // A successful tool result. `structuredContent` is the machine-readable form of
@@ -2159,20 +2160,19 @@ export function registerTools(
 
   server.tool(
     "manage_contact",
-    "Create, update, or delete a saved contact. Set `action` to choose the operation.\n\n" +
+    "Create or update a saved contact. Set `action` to choose the operation.\n\n" +
       "- create: requires phone_number and name\n" +
-      "- update: requires contact_id; only the fields you pass are changed\n" +
-      "- delete: requires contact_id (permanent)\n\n" +
-      "contact_id refers to a saved contact. Create and update return the saved contact (id, name, " +
-      "phone number, email, notes); delete returns a success flag.",
+      "- update: requires contact_id; only the fields you pass are changed\n\n" +
+      "Both return the saved contact (id, name, phone number, email, notes). To permanently " +
+      "remove a contact, use the separate delete_contact tool.",
     {
       action: z
-        .enum(["create", "update", "delete"])
-        .describe("Which operation to run: create a new contact, update an existing one, or delete one (delete is permanent)."),
+        .enum(["create", "update"])
+        .describe("Which operation to run: create a new contact, or update an existing one."),
       contact_id: z
         .string()
         .optional()
-        .describe("ID of the contact to act on, from list_contacts. Required for 'update' and 'delete'."),
+        .describe("ID of the contact to update, from list_contacts. Required for 'update'."),
       phone_number: z
         .string()
         .optional()
@@ -2181,7 +2181,7 @@ export function registerTools(
       email: z.string().email().optional().describe("An email address to save with the contact."),
       notes: z.string().optional().describe("Freeform notes to store with the contact, for your reference."),
     },
-    { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
+    { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
     async ({ action, contact_id, phone_number, name, email, notes }) => {
       if (phone_number) {
         const phoneErr = validateE164(phone_number);
@@ -2196,21 +2196,56 @@ export function registerTools(
           return ok(`Contact created: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
         }
 
-        if (action === "update") {
-          if (!contact_id) return err(new Error("update requires contact_id."));
-          const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
-          if (phone_number !== undefined) params.phoneNumber = phone_number;
-          if (name !== undefined) params.name = name;
-          if (email !== undefined) params.email = email;
-          if (notes !== undefined) params.notes = notes;
-          const result = await api.updateContact(contact_id, params);
-          return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
-        }
+        // action === "update"
+        if (!contact_id) return err(new Error("update requires contact_id."));
+        const params: { phoneNumber?: string; name?: string; email?: string; notes?: string } = {};
+        if (phone_number !== undefined) params.phoneNumber = phone_number;
+        if (name !== undefined) params.name = name;
+        if (email !== undefined) params.email = email;
+        if (notes !== undefined) params.notes = notes;
+        const result = await api.updateContact(contact_id, params);
+        return ok(`Contact updated: ${result.name} (${result.phoneNumber}) id=${result.id}`, result);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
 
-        // action === "delete"
-        if (!contact_id) return err(new Error("delete requires contact_id."));
-        const deleted = await api.deleteContact(contact_id);
-        return ok(`Contact ${contact_id} deleted.`, deleted);
+  server.tool(
+    "delete_contact",
+    "Permanently delete a saved contact. This cannot be undone — the contact and its saved name, " +
+      "phone number, email, and notes are removed. This is the only tool that deletes a contact; " +
+      "creating and updating are in manage_contact.\n\n" +
+      "Deleting requires confirm=true. When confirm is false (the default), the tool deletes nothing " +
+      "and returns a preview of the contact that would be removed, so the user can approve first.",
+    {
+      contact_id: z
+        .string()
+        .describe("ID of the contact to permanently delete, from list_contacts."),
+      confirm: z
+        .boolean()
+        .default(false)
+        .describe(
+          "Must be true to actually delete the contact. When false (the default), the tool deletes " +
+            "nothing and returns a preview. Get the user's explicit go-ahead, then call again with the " +
+            "same contact_id plus confirm=true."
+        ),
+    },
+    { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
+    async ({ contact_id, confirm }) => {
+      try {
+        if (!confirm) {
+          return ok(
+            `This will PERMANENTLY delete contact ${contact_id} (its saved name, phone number, email, ` +
+              "and notes). This cannot be undone.\n\nConfirm with the user first, then call delete_contact " +
+              "again with the SAME contact_id plus confirm=true. Use list_contacts to review the contact beforehand.",
+            { confirmationRequired: true }
+          );
+        }
+        await api.deleteContact(contact_id);
+        // Explicitly return { success: true } so structuredContent satisfies the
+        // output schema even when the API answers a DELETE with an empty body.
+        return ok(`Contact ${contact_id} deleted.`, { success: true });
       } catch (e) {
         return err(e);
       }
@@ -2308,20 +2343,17 @@ export function registerTools(
 
   server.tool(
     "get_webhook",
-    "Get the webhook configuration — its URL, status, and signing secret. Pass agent_id to get an " +
-      "agent-specific webhook, or omit for the project-level default.",
+    "Get the webhook configuration — its URL and status. The signing secret is never returned " +
+      "(it would land in model context, transcripts and logs); retrieve it from the AgentPhone " +
+      "dashboard. Pass agent_id to get an agent-specific webhook, or omit for the project-level default.",
     {
       agent_id: z
         .string()
         .optional()
         .describe("Agent ID to get that agent's webhook. Omit for project-level webhook."),
-      reveal_secret: z
-        .boolean()
-        .default(false)
-        .describe("Include the full signing secret in the output. Off by default: tool output is logged and ends up in model context."),
     },
     { readOnlyHint: true, idempotentHint: true },
-    async ({ agent_id, reveal_secret }) => {
+    async ({ agent_id }) => {
       try {
         const result = agent_id
           ? await api.getAgentWebhook(agent_id)
@@ -2334,7 +2366,8 @@ export function registerTools(
             { configured: false }
           );
         }
-        const shown = reveal_secret ? result : { ...result, secret: maskSecret(result.secret) };
+        // The signing secret never leaves through a tool; always masked.
+        const shown = { ...result, secret: maskSecret(result.secret) };
         return ok(JSON.stringify(shown, null, 2), shown);
       } catch (e) {
         return err(e);
@@ -2347,8 +2380,8 @@ export function registerTools(
     "Set a webhook URL to receive inbound messages and call events.\n\n" +
       "Pass agent_id to set a webhook for a specific agent (overrides project default). " +
       "Omit agent_id to set the project-level webhook for all agents.\n" +
-      "The signing secret is masked by default. Prefer retrieving it from the dashboard; " +
-      "reveal_secret=true exposes it to model context, transcripts and client logs.",
+      "The signing secret is never returned here (it would land in model context, transcripts " +
+      "and logs); retrieve it from the AgentPhone dashboard to verify webhook signatures.",
     {
       url: z
         .string()
@@ -2366,19 +2399,16 @@ export function registerTools(
         .number()
         .optional()
         .describe("How many seconds to wait for your endpoint to respond before giving up. If omitted, the server uses its default timeout."),
-      reveal_secret: z
-        .boolean()
-        .default(false)
-        .describe("Print the full signing secret. Off by default: tool output is logged and ends up in model context."),
     },
     { idempotentHint: true },
-    async ({ url, agent_id, context_limit, timeout, reveal_secret }) => {
+    async ({ url, agent_id, context_limit, timeout }) => {
       try {
         const result = agent_id
           ? await api.setAgentWebhook(agent_id, url, context_limit, timeout)
           : await api.setWebhook(url, context_limit, timeout);
         const scope = agent_id ? `Agent ${agent_id}` : "Project";
-        const secret = reveal_secret ? result.secret : maskSecret(result.secret);
+        // The signing secret never leaves through a tool; always masked.
+        const secret = maskSecret(result.secret);
         return ok(
           `${scope} webhook set!\n  URL: ${result.url}\n  Secret: ${secret}\n  Status: ${result.status}`,
           { ...result, secret }

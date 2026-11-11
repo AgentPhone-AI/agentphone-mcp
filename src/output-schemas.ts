@@ -467,10 +467,20 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   manage_contact: z
     .object({
       ...contactFields,
-      success: z.boolean().optional().describe("Present on delete: whether it succeeded."),
     })
     .passthrough()
-    .describe("The saved contact (create/update), or a success flag (delete)."),
+    .describe("The saved contact (create or update)."),
+
+  delete_contact: z
+    .object({
+      success: z.boolean().optional().describe("Whether the delete succeeded; absent on a confirmation preview."),
+      confirmationRequired: z.boolean().optional().describe("True when the call only previewed the deletion; re-call with confirm=true to delete."),
+    })
+    .passthrough()
+    .refine((d) => d.confirmationRequired === true || typeof d.success === "boolean", {
+      message: "a completed delete must include a success flag; only a confirmation preview may omit it",
+    })
+    .describe("A success flag when deleted, or a confirmation-required preview when confirm was false."),
 
   get_usage: z
     .object({
