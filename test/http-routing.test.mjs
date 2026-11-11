@@ -551,18 +551,13 @@ test("HTTP and stdio enforce webhook defaults and reaction validation through th
       }
       for (const name of ["get_webhook", "set_webhook"]) {
         const schema = listed.find((tool) => tool.name === name).inputSchema;
-        assert.equal(schema.properties.reveal_secret.default, false);
-        assert.ok(!(schema.required ?? []).includes("reveal_secret"));
+        assert.ok(!("reveal_secret" in (schema.properties ?? {})), `${name} must not expose reveal_secret`);
         const args = name === "set_webhook" ? { url: "https://example.com/hook" } : {};
         const masked = await client.callTool({ name, arguments: args });
         assert.notEqual(masked.isError, true, JSON.stringify(masked));
-        assert.ok(!masked.content[0].text.includes(secret));
-        const shown = await client.callTool({ name, arguments: { ...args, reveal_secret: true } });
-        assert.ok(shown.content[0].text.includes(secret));
+        assert.ok(!masked.content[0].text.includes(secret), `${name} must never return the raw secret`);
       }
       const callsBefore = requests.length;
-      const invalid = await client.callTool({ name: "get_webhook", arguments: { reveal_secret: "true" } });
-      assert.equal(invalid.isError, true);
       const mixed = await client.callTool({ name: "send_message", arguments: { reaction: "love", react_to_message_id: "msg_1", body: "hello" } });
       assert.equal(mixed.isError, true);
       assert.equal(requests.length, callsBefore, "invalid calls must not hit the API");

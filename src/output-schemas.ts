@@ -121,7 +121,7 @@ const contactFields = {
 const webhookFields = {
   id: z.string().optional().describe("The webhook's unique ID."),
   url: z.string().optional().describe("Endpoint events are POSTed to."),
-  secret: z.string().optional().describe("Signing secret for verifying payloads. Masked unless reveal_secret=true."),
+  secret: z.string().optional().describe("Always masked; the signing secret is never returned by a tool. Retrieve it from the AgentPhone dashboard."),
   status: z.string().optional().describe("Webhook status, e.g. active."),
   contextLimit: z.number().optional().describe("Recent messages included with each event as context."),
   createdAt: z.string().optional().describe("When the webhook was configured (ISO 8601)."),
@@ -468,9 +468,10 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({
       ...contactFields,
       success: z.boolean().optional().describe("Present on delete: whether it succeeded."),
+      confirmationRequired: z.boolean().optional().describe("True when a delete only previewed (confirm was not true); re-call with confirm=true to delete."),
     })
     .passthrough()
-    .describe("The saved contact (create/update), or a success flag (delete)."),
+    .describe("The saved contact (create/update), a success flag (delete), or a confirmation-required preview."),
 
   get_usage: z
     .object({
@@ -506,9 +507,9 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
       configured: z.boolean().optional().describe("False when no webhook is configured."),
     })
     .passthrough()
-    .describe("The webhook configuration (secret masked unless reveal_secret=true)."),
+    .describe("The webhook configuration (signing secret always masked; retrieve it from the dashboard)."),
 
-  set_webhook: z.object(webhookFields).passthrough().describe("The saved webhook (secret masked unless reveal_secret=true)."),
+  set_webhook: z.object(webhookFields).passthrough().describe("The saved webhook (signing secret always masked; retrieve it from the dashboard)."),
 
   delete_webhook: z
     .object({ success: z.boolean().describe("Whether the delete succeeded.") })

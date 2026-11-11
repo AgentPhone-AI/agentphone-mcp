@@ -860,31 +860,42 @@ test("account_overview reports section status on partial failure (#190)", async 
   assert.equal(r.structuredContent.sectionStatus.agents, "ok");
 });
 
-test("webhook tools mask the signing secret in structuredContent by default", async () => {
+test("webhook tools always mask the signing secret in structuredContent", async () => {
   const h = harness(makeStub());
   for (const [name, args] of [["get_webhook", {}], ["set_webhook", { url: "https://example.com/hook" }]]) {
     const r = await h.call(name, args);
     assert.ok(OUTPUT_SCHEMAS[name].safeParse(r.structuredContent).success, name);
     assert.doesNotMatch(r.structuredContent.secret, /realish/, `${name} leaked the secret in structuredContent`);
-    assert.match(r.structuredContent.secret, /masked/, `${name} should mask the secret`);
+    assert.match(r.structuredContent.secret, /hidden/, `${name} should mask the secret`);
   }
 });
 
-test("webhook structuredContent includes the real secret only with reveal_secret=true", async () => {
+test("get_webhook never returns the real secret, even if reveal_secret is passed", async () => {
   const h = harness(makeStub());
   const r = await h.call("get_webhook", { reveal_secret: true });
-  assert.equal(r.structuredContent.secret, "whsec_realish");
+  assert.notEqual(r.structuredContent.secret, "whsec_realish");
+  assert.match(r.structuredContent.secret, /hidden/);
 });
 
-test("manage_contact update and delete validate (delete passes the real success value)", async () => {
-  const h = harness(makeStub());
+test("manage_contact update validates, and delete previews then deletes with confirm", async () => {
+  let deleteCalls = 0;
+  const h = harness(makeStub({ deleteContact: async () => { deleteCalls++; return { success: true }; } }));
   const upd = await h.call("manage_contact", { action: "update", contact_id: "ct_1", name: "Jo2" });
   assert.equal(upd.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(upd.structuredContent).success);
-  const del = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
+
+  const preview = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
+  assert.equal(preview.isError, undefined);
+  assert.equal(preview.structuredContent.confirmationRequired, true);
+  assert.equal(preview.structuredContent.success, undefined, "nothing deleted on a preview");
+  assert.equal(deleteCalls, 0, "a preview must not call the delete API");
+  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(preview.structuredContent).success);
+
+  const del = await h.call("manage_contact", { action: "delete", contact_id: "ct_1", confirm: true });
   assert.equal(del.isError, undefined);
-  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(del.structuredContent).success);
   assert.equal(del.structuredContent.success, true);
+  assert.equal(deleteCalls, 1, "a confirmed delete calls the delete API exactly once");
+  assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(del.structuredContent).success);
 });
 
 // Regression for #93 at the handler layer: a DELETE that comes back as {} (a
@@ -896,9 +907,10 @@ test("delete-style tools tolerate an empty ({}) API result (#93)", async () => {
   assert.ok(OUTPUT_SCHEMAS.detach_number.safeParse(d.structuredContent).success, "detach_number tolerates {}");
   assert.equal(d.structuredContent.success, true);
 
-  const c = await h.call("manage_contact", { action: "delete", contact_id: "ct_1" });
+  const c = await h.call("manage_contact", { action: "delete", contact_id: "ct_1", confirm: true });
   assert.equal(c.isError, undefined, "manage_contact delete should not error on {}");
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(c.structuredContent).success, "manage_contact delete tolerates {}");
+  assert.equal(c.structuredContent.success, true, "manage_contact delete normalizes an empty API response");
 });
 
 // There is no structured-content fallback: every success path must return its

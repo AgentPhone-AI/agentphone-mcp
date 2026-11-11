@@ -55,38 +55,40 @@ const WEBHOOK = {
 };
 
 // ---------------------------------------------------------------------------
-// #64 — the signing secret stays out of tool output unless asked for
+// #64 — the signing secret never leaves through a tool (no reveal option)
 // ---------------------------------------------------------------------------
 
-test("get_webhook masks the signing secret by default", async () => {
+test("get_webhook always masks the signing secret", async () => {
   const h = harness({ getWebhook: async () => WEBHOOK });
-  const result = await h.call("get_webhook", { reveal_secret: false });
+  const result = await h.call("get_webhook", {});
   assert.equal(result.isError, undefined);
   assert.doesNotMatch(result.content[0].text, new RegExp(SECRET));
-  assert.match(result.content[0].text, /whsec_•+ \(masked; pass reveal_secret=true/);
+  assert.match(result.content[0].text, /whsec_•+ \(hidden; retrieve it from the AgentPhone dashboard\)/);
   assert.match(result.content[0].text, /https:\/\/example\.com\/hook/);
+  // structuredContent must not carry the real secret either.
+  assert.notEqual(result.structuredContent.secret, SECRET);
 });
 
-test("get_webhook reveals the secret only with reveal_secret=true", async () => {
+test("get_webhook has no reveal_secret option, so the secret can't be requested", async () => {
   const h = harness({ getAgentWebhook: async () => WEBHOOK });
+  assert.equal("reveal_secret" in h.schema("get_webhook"), false, "the param must be gone");
+  // Even if a caller passes it, it's stripped and the secret stays masked.
   const result = await h.call("get_webhook", { agent_id: "agt_1", reveal_secret: true });
-  assert.match(result.content[0].text, new RegExp(SECRET));
-  assert.deepEqual(h.calls.map((c) => c.name), ["getAgentWebhook"]);
+  assert.doesNotMatch(result.content[0].text, new RegExp(SECRET));
 });
 
-test("set_webhook masks the secret by default and reveals it on request", async () => {
+test("set_webhook always masks the secret", async () => {
   const h = harness({ setWebhook: async () => WEBHOOK });
-  const masked = await h.call("set_webhook", { url: WEBHOOK.url, reveal_secret: false });
+  assert.equal("reveal_secret" in h.schema("set_webhook"), false, "the param must be gone");
+  const masked = await h.call("set_webhook", { url: WEBHOOK.url });
   assert.doesNotMatch(masked.content[0].text, new RegExp(SECRET));
-  assert.match(masked.content[0].text, /Secret: whsec_•+ \(masked/);
-
-  const shown = await h.call("set_webhook", { url: WEBHOOK.url, reveal_secret: true });
-  assert.match(shown.content[0].text, new RegExp(`Secret: ${SECRET}`));
+  assert.match(masked.content[0].text, /Secret: whsec_•+ \(hidden/);
+  assert.notEqual(masked.structuredContent.secret, SECRET);
 });
 
 test("a short secret is never shown in full by the mask", async () => {
   const h = harness({ getWebhook: async () => ({ ...WEBHOOK, secret: "abc" }) });
-  const result = await h.call("get_webhook", { reveal_secret: false });
+  const result = await h.call("get_webhook", {});
   assert.doesNotMatch(result.content[0].text, /"secret": "abc"/);
 });
 
@@ -191,7 +193,7 @@ test("the disclosure really is prepended by the connector", async () => {
 });
 
 
-test("webhook masking and reveal cover both tools and both scopes without changing the API response", async (t) => {
+test("the signing secret never appears in webhook tool output, for both tools and scopes", async (t) => {
   for (const tool of ["get_webhook", "set_webhook"]) {
     for (const agent of [undefined, "agt_1"]) {
       await t.test(`${tool} ${agent ?? "project"}`, async () => {
@@ -199,17 +201,14 @@ test("webhook masking and reveal cover both tools and both scopes without changi
         const response = Object.freeze({ ...WEBHOOK });
         const h = harness({ [method]: async () => response });
         const args = { ...(agent ? { agent_id: agent } : {}), ...(tool === "set_webhook" ? { url: WEBHOOK.url, context_limit: 5, timeout: 8 } : {}) };
-        for (const reveal of [undefined, false, true]) {
-          const result = await h.call(tool, { ...args, ...(reveal === undefined ? {} : { reveal_secret: reveal }) });
-          assert.notEqual(result.isError, true);
-          assert.equal(result.content[0].text.includes(SECRET), reveal === true);
-          assert.equal(response.secret, SECRET);
-        }
+        const result = await h.call(tool, args);
+        assert.notEqual(result.isError, true);
+        assert.equal(result.content[0].text.includes(SECRET), false, "the raw secret must never appear");
+        assert.notEqual(result.structuredContent.secret, SECRET);
+        assert.equal(response.secret, SECRET, "the API response is left unchanged");
         assert.ok(h.calls.every((c) => c.name === method));
         const expected = tool === "get_webhook" ? (agent ? [agent] : []) : [...(agent ? [agent] : []), WEBHOOK.url, 5, 8];
         assert.deepEqual(h.calls[0].args, expected);
-        await assert.rejects(h.call(tool, { ...args, reveal_secret: "true" }));
-        assert.equal(h.calls.length, 3, "invalid reveal input must not reach the API");
       });
     }
   }
@@ -289,7 +288,7 @@ test("masking hides all non-prefix bytes for short and unprefixed secrets", asyn
       const result = await h.call("get_webhook", {});
       const masked = JSON.parse(result.content[0].text).secret;
       const prefix = secret.startsWith("whsec_") && secret.length > 6 ? "whsec_" : "";
-      assert.equal(masked, `${prefix}•••••• (masked; pass reveal_secret=true to show it)`);
+      assert.equal(masked, `${prefix}•••••• (hidden; retrieve it from the AgentPhone dashboard)`);
     });
   }
 });

@@ -93,8 +93,8 @@ const INSTRUCTIONS = [
     "directly through the AgentPhone API or SDKs bypass it.",
   "",
   "Billing and irreversible actions: buy_number, calls, and messages are billed per use. " +
-    "delete_agent and manage_contact with action=delete cannot be undone. Deleting a webhook is " +
-    "reversible — set_webhook restores it.",
+    "delete_agent and manage_contact with action=delete cannot be undone (delete needs confirm=true). " +
+    "Deleting a webhook is reversible — set_webhook restores it.",
   "",
   "Use IDs returned by account_overview, create_agent, buy_number, or the relevant list_* tools " +
     "before calling anything that takes an agent_id, number_id, conversation_id, or call_id.",
