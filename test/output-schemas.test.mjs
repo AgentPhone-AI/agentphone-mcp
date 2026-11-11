@@ -878,7 +878,8 @@ test("get_webhook never returns the real secret, even if reveal_secret is passed
 });
 
 test("manage_contact update validates, and delete previews then deletes with confirm", async () => {
-  const h = harness(makeStub());
+  let deleteCalls = 0;
+  const h = harness(makeStub({ deleteContact: async () => { deleteCalls++; return { success: true }; } }));
   const upd = await h.call("manage_contact", { action: "update", contact_id: "ct_1", name: "Jo2" });
   assert.equal(upd.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(upd.structuredContent).success);
@@ -887,11 +888,13 @@ test("manage_contact update validates, and delete previews then deletes with con
   assert.equal(preview.isError, undefined);
   assert.equal(preview.structuredContent.confirmationRequired, true);
   assert.equal(preview.structuredContent.success, undefined, "nothing deleted on a preview");
+  assert.equal(deleteCalls, 0, "a preview must not call the delete API");
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(preview.structuredContent).success);
 
   const del = await h.call("manage_contact", { action: "delete", contact_id: "ct_1", confirm: true });
   assert.equal(del.isError, undefined);
   assert.equal(del.structuredContent.success, true);
+  assert.equal(deleteCalls, 1, "a confirmed delete calls the delete API exactly once");
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(del.structuredContent).success);
 });
 
@@ -907,6 +910,7 @@ test("delete-style tools tolerate an empty ({}) API result (#93)", async () => {
   const c = await h.call("manage_contact", { action: "delete", contact_id: "ct_1", confirm: true });
   assert.equal(c.isError, undefined, "manage_contact delete should not error on {}");
   assert.ok(OUTPUT_SCHEMAS.manage_contact.safeParse(c.structuredContent).success, "manage_contact delete tolerates {}");
+  assert.equal(c.structuredContent.success, true, "manage_contact delete normalizes an empty API response");
 });
 
 // There is no structured-content fallback: every success path must return its
