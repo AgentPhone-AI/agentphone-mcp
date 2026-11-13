@@ -565,6 +565,7 @@ test("make_call: non-self-identifying greetings (topic mentions, denials, bare p
     "I'm not the company's AI",
     "Quick call about Acme's AI pricing",
     "Discuss the company's AI roadmap",
+    "Please claim an AI-based tool", // "claim" must not match the "i'm" cue (word boundary)
     "Mujtaba Valli's AI assistant", // bare possessive, no identification cue -> prefixed (safe)
   ]) {
     await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: g, confirm: true });

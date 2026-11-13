@@ -169,7 +169,7 @@ function withDisclosure(greeting?: string): string {
 // In the possessive form the name is 1–3 words and "AI" must be the identity itself
 // (end/punctuation or an identity noun), never an adjective like "AI roadmap".
 function alreadyDiscloses(text: string): boolean {
-  const cue = String.raw`(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+(?!not\b)`;
+  const cue = String.raw`\b(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+(?!not\b)`;
   const identity = String.raw`(?:an?\s+ai\b|[\p{L}][\p{L}.'’-]*(?:\s+[\p{L}][\p{L}.'’-]*){0,2}['’]s\s+ai(?:\s+(?:assistant|agent|bot|concierge|receptionist|voice))?(?![-\s]*\w))`;
   return new RegExp(cue + identity, "iu").test(text);
 }
