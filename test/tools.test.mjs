@@ -542,17 +542,31 @@ test("watch_messages works when no registrar is wired (registration optional)", 
 const CALL_RESULT = { id: "c_1", fromNumber: "+14155550000", toNumber: "+14155551234", direction: "outbound", status: "queued", startedAt: "", retellCallId: null };
 const DISCLOSURE = "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
 
-test("make_call: a greeting that already self-identifies (incl. possessive) is not double-disclosed", async () => {
+test("make_call: a cue-anchored self-identification (incl. possessive) is not double-disclosed", async () => {
   const h = harness({ makeCall: async () => CALL_RESULT });
-  for (const g of ["I'm an AI assistant for Acme", "Mujtaba Valli's AI assistant", "This is X's AI", "You're speaking with an AI"]) {
+  for (const g of [
+    "I'm an AI assistant for Acme",
+    "This is X's AI",
+    "I'm Mujtaba Valli's AI assistant",
+    "You're speaking with an AI",
+    "Hi, this is Acme's AI assistant.",
+  ]) {
     await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: g, confirm: true });
     assert.equal(h.calls.at(-1).args[2], g, `self-identifying greeting passes through unchanged: ${g}`);
   }
 });
 
-test("make_call: a non-identifying greeting still gets the disclosure prefix", async () => {
+test("make_call: non-self-identifying greetings (topic mentions, denials, bare possessive) still get the disclosure prefix", async () => {
   const h = harness({ makeCall: async () => CALL_RESULT });
-  for (const g of ["Discuss AI ethics", "Our AI-powered widget", "I'm not an AI"]) {
+  for (const g of [
+    "Discuss AI ethics",
+    "Our AI-powered widget",
+    "I'm not an AI",
+    "I'm not the company's AI",
+    "Quick call about Acme's AI pricing",
+    "Discuss the company's AI roadmap",
+    "Mujtaba Valli's AI assistant", // bare possessive, no identification cue -> prefixed (safe)
+  ]) {
     await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: g, confirm: true });
     const sent = h.calls.at(-1).args[2];
     assert.equal(sent, `${DISCLOSURE} ${g}`, `non-identifying greeting gets prefix: ${g}`);
@@ -598,17 +612,29 @@ test("update_agent forwards call screening fields; empty string clears", async (
   assert.equal(h.calls.filter((c) => c.name === "getAgent").length, 0, "screening-only update needs no agent read");
 });
 
-test("get_call shows end reason and recording when present", async () => {
+test("get_call shows end + failure reason and recording-availability, never the recording link", async () => {
   const h = harness({ getCall: async () => ({ id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "failed", startedAt: "t", endedAt: "t2", endReason: "dial_no_answer", failureReason: "no_answer", recordingUrl: "https://rec/1", recordingAvailable: true, transcripts: [] }) });
   const r = await h.call("get_call", { call_id: "c" });
-  assert.match(r.content[0].text, /End reason: dial_no_answer \(no_answer\)/);
-  assert.match(r.content[0].text, /Recording URL: https:\/\/rec\/1/);
+  assert.match(r.content[0].text, /End reason: dial_no_answer/);
+  assert.match(r.content[0].text, /Failure reason: no_answer/);
   assert.match(r.content[0].text, /Recording available: true/);
+  // Policy: the recording link must appear in neither the text nor the structured output.
+  assert.doesNotMatch(r.content[0].text, /https:\/\/rec\/1/);
+  assert.equal(r.structuredContent.recordingUrl, undefined, "recordingUrl stripped from structured output");
+  assert.equal(r.structuredContent.recordingAvailable, true);
 });
 
-test("get_call omits end reason and recording lines when absent", async () => {
+test("get_call renders a failure reason even with no end reason", async () => {
+  const h = harness({ getCall: async () => ({ id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "failed", startedAt: "t", endedAt: "t2", failureReason: "carrier_rejected", transcripts: [] }) });
+  const r = await h.call("get_call", { call_id: "c" });
+  assert.doesNotMatch(r.content[0].text, /End reason/);
+  assert.match(r.content[0].text, /Failure reason: carrier_rejected/);
+});
+
+test("get_call omits end/failure/recording lines when absent", async () => {
   const h = harness({ getCall: async () => ({ id: "c", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "completed", startedAt: "t", endedAt: "t2", transcripts: [] }) });
   const r = await h.call("get_call", { call_id: "c" });
   assert.doesNotMatch(r.content[0].text, /End reason/);
+  assert.doesNotMatch(r.content[0].text, /Failure reason/);
   assert.doesNotMatch(r.content[0].text, /Recording/);
 });

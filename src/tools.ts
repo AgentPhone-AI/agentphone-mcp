@@ -158,18 +158,20 @@ function withDisclosure(greeting?: string): string {
   return alreadyDiscloses(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
 }
 
-// True only when the text already contains an explicit AI self-identification
-// ("I'm an AI", "this is an AI assistant", "you're speaking with an AI", and
-// possessive forms like "Mujtaba Valli's AI assistant" or "X's AI"). A bare
-// mention like "Discuss AI ethics", a hyphenated adjective like "AI-powered", or a
-// denial like "I'm not an AI" does NOT count, so we don't skip the disclosure then.
+// True only when the text already contains an explicit AI self-identification.
+// Both forms require a first/second-person identification CUE that is not negated,
+// so a bare topic mention ("Discuss AI ethics", "Acme's AI pricing"), a hyphenated
+// adjective ("AI-powered"), or a denial ("I'm not an AI", "I'm not the company's
+// AI") does NOT count — we must not skip the disclosure for those.
+//   - "<cue> an AI"                     e.g. "I'm an AI", "this is an AI assistant"
+//   - "<cue> <name>'s AI [assistant]"   e.g. "I'm Mujtaba Valli's AI assistant",
+//                                            "this is X's AI"
+// In the possessive form the name is 1–3 words and "AI" must be the identity itself
+// (end/punctuation or an identity noun), never an adjective like "AI roadmap".
 function alreadyDiscloses(text: string): boolean {
-  return (
-    /\b(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+an?\s+ai\b/i.test(text) ||
-    // Possessive self-identification: "<name>'s AI" / "<name>'s AI assistant".
-    // (?![-\w]) keeps "AI-powered"/"AIleen" from matching.
-    /['’]s\s+ai(?![-\w])/i.test(text)
-  );
+  const cue = String.raw`(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+(?!not\b)`;
+  const identity = String.raw`(?:an?\s+ai\b|[\p{L}][\p{L}.'’-]*(?:\s+[\p{L}][\p{L}.'’-]*){0,2}['’]s\s+ai(?:\s+(?:assistant|agent|bot|concierge|receptionist|voice))?(?![-\s]*\w))`;
+  return new RegExp(cue + identity, "iu").test(text);
 }
 
 // Prepend the spoken AI disclosure to a hosted agent's opening line or voicemail,
@@ -1328,6 +1330,10 @@ export function registerTools(
     async ({ call_id }) => {
       try {
         const result = await api.getCall(call_id);
+        // Policy: the connector never surfaces a call recording link (README:
+        // "No audio is exposed"). Keep it out of the structured output too; a
+        // boolean recordingAvailable flag is metadata, not the recording.
+        const { recordingUrl: _recordingUrl, ...safeResult } = result;
 
         let transcript = "No transcript available.";
         if (result.transcripts && result.transcripts.length > 0) {
@@ -1352,16 +1358,14 @@ export function registerTools(
             `Status: ${result.status}`,
             `Started: ${result.startedAt}`,
             result.endedAt ? `Ended: ${result.endedAt}` : null,
-            result.endReason
-              ? `End reason: ${result.endReason}${result.failureReason ? ` (${result.failureReason})` : ""}`
-              : null,
-            result.recordingUrl ? `Recording URL: ${result.recordingUrl}` : null,
+            result.endReason ? `End reason: ${result.endReason}` : null,
+            result.failureReason ? `Failure reason: ${result.failureReason}` : null,
             result.recordingAvailable != null ? `Recording available: ${result.recordingAvailable}` : null,
             `\nTranscript:\n${transcript}`,
           ]
             .filter(Boolean)
             .join("\n"),
-          result
+          safeResult
         );
       } catch (e) {
         return err(e);
@@ -1400,9 +1404,10 @@ export function registerTools(
       "Each call is individually authorized by the user: this returns a preview and places no call " +
       "unless confirm=true, so confirm the destination with the user before dialing.\n" +
       "The agent must have a phone number attached and a webhook configured. " +
-      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API; " +
-      "no tool argument disables that prefix. Calls made directly through the AgentPhone API or SDKs " +
-      "bypass this connector's disclosure logic. " +
+      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API. " +
+      "The one exception is wait_for_speaker: it connects silently and sends no greeting, so your call " +
+      "logic must have the agent identify as an AI when it first speaks. Calls made directly through the " +
+      "AgentPhone API or SDKs bypass this connector's disclosure logic. " +
       "Returns the new call's ID, status, and the numbers it connects.",
     {
       agent_id: z
@@ -1424,9 +1429,9 @@ export function registerTools(
         .default(false)
         .describe(
           "When true, the call connects silently and the agent waits for the person to speak first " +
-            "instead of opening with a greeting (no initial_greeting is sent). The agent must still " +
-            "identify itself as an AI when it responds — hosted agents do this automatically via their " +
-            "instructions. Default false: the call opens with the AI disclosure."
+            "instead of opening with a greeting (no initial_greeting is sent). Your webhook/agent logic " +
+            "must still have the agent identify itself as an AI when it responds. Default false: the " +
+            "call opens with the AI disclosure."
         ),
       from_number_id: z
         .string()
@@ -1481,9 +1486,10 @@ export function registerTools(
       "unless confirm=true. Confirm the destination and topic with the user before dialing.\n" +
       "The agent must have a phone number attached.\n" +
       "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API " +
-      "and adds AI identity instructions around the topic. No tool argument disables these additions, " +
-      "but they do not guarantee the model's behavior. Calls made directly through the AgentPhone API " +
-      "or SDKs bypass this connector's disclosure logic.\n" +
+      "and adds AI identity instructions around the topic. wait_for_speaker skips the spoken greeting " +
+      "prefix (the call waits for the callee), but the AI identity instructions still apply; no argument " +
+      "removes those. These guide the model but do not guarantee its behavior. Calls made directly " +
+      "through the AgentPhone API or SDKs bypass this connector's disclosure logic.\n" +
       "This returns immediately with the call's ID and initial status. The call then runs on its own; " +
       "use get_call with the call ID to fetch the transcript once it has progressed.",
     {

@@ -206,7 +206,7 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
-| `get_call` | Get call details and transcript, including end reason and recording link when available |
+| `get_call` | Get call details and transcript, including end reason and whether a recording is available (the recording audio/link is never exposed) |
 | `end_call` | End an in-progress call (safe to retry; ending a finished call is a no-op) |
 | `make_call` | Place an outbound call (webhook-driven). **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` (connect silently and let the person speak first) |
 | `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` |
