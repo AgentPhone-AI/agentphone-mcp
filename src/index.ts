@@ -98,8 +98,10 @@ const instructionsFor = (watchMessages: boolean): string => [
   "Calling: make_conversation_call is the simplest way to place an automated call — the built-in " +
     "AI pursues a topic you give it and returns the transcript, with no webhook needed. make_call " +
     "is for webhook-driven flows you control. The connector prepends an AI disclosure to the " +
-    "greeting of calls its call tools place, and no tool argument disables it; calls placed " +
-    "directly through the AgentPhone API or SDKs bypass it.",
+    "greeting of calls its call tools place; the one exception is wait_for_speaker, which connects " +
+    "silently (the agent must then identify as an AI when it speaks — make_conversation_call still " +
+    "enforces this via its system prompt). Calls placed directly through the AgentPhone API or SDKs " +
+    "bypass this connector's disclosure logic.",
   "",
   "Billing and irreversible actions: buy_number, calls, and messages are billed per use. " +
     "delete_agent and manage_contact with action=delete cannot be undone (delete needs confirm=true). " +
