@@ -206,18 +206,18 @@ The optional anonymous mode instead uses the configured server API key.
 | Tool | Description |
 |------|-------------|
 | `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
-| `get_call` | Get call details and transcript |
+| `get_call` | Get call details and transcript, including end reason and recording link when available |
 | `end_call` | End an in-progress call (safe to retry; ending a finished call is a no-op) |
-| `make_call` | Place an outbound call (webhook-driven). **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, and call-screening controls |
-| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, and call-screening controls |
+| `make_call` | Place an outbound call (webhook-driven). **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` (connect silently and let the person speak first) |
+| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` |
 
 ### Agents
 
 | Tool | Description |
 |------|-------------|
 | `list_agents` | List all agents with their numbers and voice config |
-| `create_agent` | Create an agent with voice, system prompt, call transfer, voicemail, and voice tuning (speed, interruption sensitivity, backchannel, language, and more) |
-| `update_agent` | Update an agent's configuration |
+| `create_agent` | Create an agent with voice, system prompt, call transfer, voicemail, call-screening identity/purpose, and voice tuning (speed, interruption sensitivity, backchannel, language, and more) |
+| `update_agent` | Update an agent's configuration (incl. call-screening identity/purpose) |
 | `delete_agent` | Delete an agent (numbers are kept but unassigned) |
 | `get_agent` | Get agent details including phone numbers and voice config |
 | `attach_number` | Assign a phone number to an agent |

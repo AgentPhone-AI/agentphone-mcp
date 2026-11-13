@@ -147,18 +147,29 @@ const AI_DISCLOSURE_SYSTEM =
   "You must clearly identify yourself as an AI at the very start of the call and again any time " +
   "you are asked. Never claim or imply that you are a human.";
 
-/** Prefix the submitted greeting with the disclosure, keeping caller text after it. */
+/**
+ * Prefix the submitted greeting with the disclosure, keeping caller text after it.
+ * If the greeting already self-identifies as an AI, it's left as-is (no double
+ * disclosure), mirroring withSpokenDisclosure for hosted opening lines.
+ */
 function withDisclosure(greeting?: string): string {
   const extra = (greeting ?? "").trim();
-  return extra ? `${AI_DISCLOSURE} ${extra}` : AI_DISCLOSURE;
+  if (!extra) return AI_DISCLOSURE;
+  return alreadyDiscloses(extra) ? extra : `${AI_DISCLOSURE} ${extra}`;
 }
 
 // True only when the text already contains an explicit AI self-identification
-// ("I'm an AI", "this is an AI assistant", "you're speaking with an AI", …). A bare
-// mention like "Discuss AI ethics" or a denial like "I'm not an AI" does NOT count,
-// so we don't skip the disclosure for those.
+// ("I'm an AI", "this is an AI assistant", "you're speaking with an AI", and
+// possessive forms like "Mujtaba Valli's AI assistant" or "X's AI"). A bare
+// mention like "Discuss AI ethics", a hyphenated adjective like "AI-powered", or a
+// denial like "I'm not an AI" does NOT count, so we don't skip the disclosure then.
 function alreadyDiscloses(text: string): boolean {
-  return /\b(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+an?\s+ai\b/i.test(text);
+  return (
+    /\b(?:i['’]?m|i\s+am|this\s+is|you\s*['’]?re\s+(?:speaking|talking)\s+(?:to|with)|calling\s+from)\s+an?\s+ai\b/i.test(text) ||
+    // Possessive self-identification: "<name>'s AI" / "<name>'s AI assistant".
+    // (?![-\w]) keeps "AI-powered"/"AIleen" from matching.
+    /['’]s\s+ai(?![-\w])/i.test(text)
+  );
 }
 
 // Prepend the spoken AI disclosure to a hosted agent's opening line or voicemail,
@@ -1341,6 +1352,11 @@ export function registerTools(
             `Status: ${result.status}`,
             `Started: ${result.startedAt}`,
             result.endedAt ? `Ended: ${result.endedAt}` : null,
+            result.endReason
+              ? `End reason: ${result.endReason}${result.failureReason ? ` (${result.failureReason})` : ""}`
+              : null,
+            result.recordingUrl ? `Recording URL: ${result.recordingUrl}` : null,
+            result.recordingAvailable != null ? `Recording available: ${result.recordingAvailable}` : null,
             `\nTranscript:\n${transcript}`,
           ]
             .filter(Boolean)
@@ -1400,7 +1416,17 @@ export function registerTools(
         .optional()
         .describe(
           "What the agent says right after the required AI disclosure when the call connects. If " +
-            "omitted, the call still opens with the disclosure and your webhook drives what comes next."
+            "omitted, the call still opens with the disclosure and your webhook drives what comes next. " +
+            "Ignored when wait_for_speaker is true."
+        ),
+      wait_for_speaker: z
+        .boolean()
+        .default(false)
+        .describe(
+          "When true, the call connects silently and the agent waits for the person to speak first " +
+            "instead of opening with a greeting (no initial_greeting is sent). The agent must still " +
+            "identify itself as an AI when it responds — hosted agents do this automatically via their " +
+            "instructions. Default false: the call opens with the AI disclosure."
         ),
       from_number_id: z
         .string()
@@ -1414,7 +1440,7 @@ export function registerTools(
       ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, initial_greeting, from_number_id, voice, confirm, ...controls }) => {
+    async ({ agent_id, to_number, initial_greeting, wait_for_speaker, from_number_id, voice, confirm, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
@@ -1422,7 +1448,9 @@ export function registerTools(
         return confirmationPreview(
           `This will place an outbound call to ${to_number}` +
             `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}. ` +
-            `The call opens with the AI disclosure${initial_greeting ? `, then: "${initial_greeting}"` : "."}`
+            (wait_for_speaker
+              ? "The call waits silently for the person to speak first; the agent identifies as an AI when it responds."
+              : `The call opens with the AI disclosure${initial_greeting ? `, then: "${initial_greeting}"` : "."}`)
         );
       }
 
@@ -1430,7 +1458,7 @@ export function registerTools(
         const result = await api.makeCall(
           agent_id,
           to_number,
-          withDisclosure(initial_greeting),
+          wait_for_speaker ? "" : withDisclosure(initial_greeting),
           from_number_id,
           voice,
           buildCallControls(controls),
@@ -1473,7 +1501,15 @@ export function registerTools(
       initial_greeting: z
         .string()
         .optional()
-        .describe("Text appended after the connector’s AI disclosure in the greeting sent to the API. If omitted, only the disclosure is sent."),
+        .describe("Text appended after the connector’s AI disclosure in the greeting sent to the API. If omitted, only the disclosure is sent. Ignored when wait_for_speaker is true."),
+      wait_for_speaker: z
+        .boolean()
+        .default(false)
+        .describe(
+          "When true, the call connects silently and the assistant waits for the person to speak first " +
+            "instead of opening with a greeting. The assistant still identifies as an AI when it responds: " +
+            "the connector's AI identity instructions wrap the topic regardless. Default false."
+        ),
       from_number_id: z
         .string()
         .optional()
@@ -1486,7 +1522,7 @@ export function registerTools(
       ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, topic, initial_greeting, from_number_id, voice, confirm, ...controls }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, wait_for_speaker, from_number_id, voice, confirm, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
@@ -1494,7 +1530,8 @@ export function registerTools(
         return confirmationPreview(
           `This will place an autonomous AI phone call to ${to_number}` +
             `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}, ` +
-            `where the assistant (identifying itself as an AI) will hold a conversation about: "${topic}".`
+            `where the assistant (identifying itself as an AI) will hold a conversation about: "${topic}".` +
+            (wait_for_speaker ? " The call waits silently for the person to speak first." : "")
         );
       }
 
@@ -1503,7 +1540,7 @@ export function registerTools(
           agent_id,
           to_number,
           lockedSystemPrompt(topic),
-          withDisclosure(initial_greeting),
+          wait_for_speaker ? "" : withDisclosure(initial_greeting),
           from_number_id,
           voice,
           buildCallControls(controls),
@@ -1611,6 +1648,14 @@ export function registerTools(
         .string()
         .optional()
         .describe("Message the agent leaves when an outbound call reaches the callee's voicemail. When set, the agent leaves this message instead of simply hanging up."),
+      call_screening_identity: z
+        .string()
+        .optional()
+        .describe("Default identity to present if a callee's carrier screens the agent's outbound calls (e.g. your business name). Per-call make_call can override it."),
+      call_screening_purpose: z
+        .string()
+        .optional()
+        .describe("Default stated purpose to present to call screening (e.g. 'appointment reminder')."),
       voice_speed: z
         .number().min(0.5).max(2)
         .optional()
@@ -1649,7 +1694,7 @@ export function registerTools(
         .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
-    async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
+    async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, call_screening_identity, call_screening_purpose, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -1674,6 +1719,8 @@ export function registerTools(
           modelTier: model_tier,
           transferNumber: transfer_number,
           voicemailMessage: hosted ? hostedVoicemail ?? voicemail_message : voicemail_message,
+          callScreeningIdentity: call_screening_identity,
+          callScreeningPurpose: call_screening_purpose,
           voiceSpeed: voice_speed,
           interruptionSensitivity: interruption_sensitivity,
           enableBackchannel: enable_backchannel,
@@ -1736,6 +1783,14 @@ export function registerTools(
         .string()
         .optional()
         .describe("Message the agent leaves when an outbound call reaches the callee's voicemail, or empty string to clear it."),
+      call_screening_identity: z
+        .string()
+        .optional()
+        .describe("Default identity to present if a callee's carrier screens the agent's outbound calls (e.g. your business name), or empty string to clear it."),
+      call_screening_purpose: z
+        .string()
+        .optional()
+        .describe("Default stated purpose to present to call screening (e.g. 'appointment reminder'), or empty string to clear it."),
       voice_speed: z
         .number().min(0.5).max(2)
         .optional()
@@ -1774,7 +1829,7 @@ export function registerTools(
         .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
     },
     { idempotentHint: true },
-    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
+    async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, call_screening_identity, call_screening_purpose, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
       if (transfer_number) {
         const phoneErr = validateE164(transfer_number);
         if (phoneErr) return err(new Error(phoneErr));
@@ -1834,6 +1889,8 @@ export function registerTools(
         if (voice !== undefined) params.voice = voice;
         if (model_tier !== undefined) params.modelTier = model_tier;
         if (transfer_number !== undefined) params.transferNumber = transfer_number;
+        if (call_screening_identity !== undefined) params.callScreeningIdentity = call_screening_identity;
+        if (call_screening_purpose !== undefined) params.callScreeningPurpose = call_screening_purpose;
         if (voice_speed !== undefined) params.voiceSpeed = voice_speed;
         if (interruption_sensitivity !== undefined) params.interruptionSensitivity = interruption_sensitivity;
         if (enable_backchannel !== undefined) params.enableBackchannel = enable_backchannel;

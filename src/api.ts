@@ -342,6 +342,8 @@ export class AgentPhoneAPI {
     modelTier?: string;
     transferNumber?: string;
     voicemailMessage?: string;
+    callScreeningIdentity?: string;
+    callScreeningPurpose?: string;
     sttMode?: string;
     ambientSound?: string;
     denoisingMode?: string;
@@ -363,6 +365,8 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      callScreeningIdentity: string | null;
+      callScreeningPurpose: string | null;
       sttMode: string;
       ambientSound: string;
       denoisingMode: string;
@@ -389,6 +393,8 @@ export class AgentPhoneAPI {
       modelTier?: string;
       transferNumber?: string;
       voicemailMessage?: string;
+      callScreeningIdentity?: string;
+      callScreeningPurpose?: string;
       sttMode?: string;
       ambientSound?: string;
       denoisingMode?: string;
@@ -411,6 +417,8 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      callScreeningIdentity: string | null;
+      callScreeningPurpose: string | null;
       sttMode: string;
       ambientSound: string;
       denoisingMode: string;
@@ -445,6 +453,8 @@ export class AgentPhoneAPI {
       modelTier: string;
       transferNumber: string | null;
       voicemailMessage: string | null;
+      callScreeningIdentity: string | null;
+      callScreeningPurpose: string | null;
       sttMode: string;
       ambientSound: string;
       denoisingMode: string;
@@ -612,6 +622,10 @@ export class AgentPhoneAPI {
       startedAt: string;
       endedAt: string | null;
       agentId: string | null;
+      endReason?: string | null;
+      failureReason?: string | null;
+      recordingUrl?: string | null;
+      recordingAvailable?: boolean | null;
       transcripts: Array<{
         id: string;
         transcript: string;
