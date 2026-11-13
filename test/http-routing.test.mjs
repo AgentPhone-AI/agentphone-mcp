@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -60,6 +61,9 @@ async function startHttpServer(t, environment = {}, args = []) {
   delete env.MCP_OAUTH_CLIENT_ID;
   delete env.MCP_OAUTH_CLIENT_SECRET;
   delete env.AGENTPHONE_MCP_PUBLIC_URL;
+  delete env.WAKESHIFT_KEY;
+  delete env.WAKESHIFT_CORE;
+  delete env.AGENTPHONE_EVENTS_SECRET;
   Object.assign(env, environment);
 
   const child = spawn(process.execPath, ["dist/index.js", ...args], {
@@ -650,6 +654,46 @@ test("tools/list is identical across HTTP and stdio transports (tasks#202)", asy
   // it explicitly (cross-transport equality alone wouldn't catch both flipping).
   assert.equal(httpTools.attach_number.annotations.destructiveHint, false);
   assert.equal(httpTools.detach_number.annotations.destructiveHint, false);
+});
+
+test("the instructions mention watch_messages only where it is offered (HTTP with Wakeshift on)", async (t) => {
+  // A well-formed key and secret that belong to nothing. Reading the server
+  // card sends no request to Wakeshift, so the core is never contacted.
+  const wakeshift = {
+    WAKESHIFT_KEY: `wst_test_agentphone_${randomBytes(32).toString("base64url")}`,
+    WAKESHIFT_CORE: "https://wakeshift.invalid",
+    AGENTPHONE_EVENTS_SECRET: `whsec_${randomBytes(32).toString("base64")}`,
+  };
+  const cardInstructions = async (environment) => {
+    const { child, origin } = await startHttpServer(t, environment);
+    await waitUntilReady(`${origin}/.well-known/mcp/server-card.json`, child);
+    return (await (await fetch(`${origin}/.well-known/mcp/server-card.json`)).json()).instructions;
+  };
+
+  // stdio never has Wakeshift, even with both variables set.
+  const backend = await startFakeBackend(t);
+  const transport = new StdioClientTransport({
+    command: process.execPath, args: ["dist/index.js", "--stdio"], cwd: process.cwd(),
+    env: { AGENTPHONE_API_KEY: "stdio-key", AGENTPHONE_BASE_URL: backend.url, MCP_USE_ANONYMIZED_TELEMETRY: "false", ...wakeshift }, stderr: "pipe",
+  });
+  transport.stderr?.on("data", () => {});
+  const client = new Client({ name: "test", version: "0.0.0" });
+  t.after(() => client.close());
+  await client.connect(transport);
+  const stdio = client.getInstructions();
+  assert.match(stdio, /get_messages/);
+  assert.doesNotMatch(stdio, /watch_messages/);
+  assert.ok(!(await client.listTools()).tools.some((tool) => tool.name === "watch_messages"));
+
+  // HTTP without Wakeshift, and with only one of the two variables: the same text.
+  assert.equal(await cardInstructions({}), stdio);
+  assert.equal(await cardInstructions({ WAKESHIFT_KEY: wakeshift.WAKESHIFT_KEY, WAKESHIFT_CORE: wakeshift.WAKESHIFT_CORE }), stdio);
+
+  // HTTP with Wakeshift on: one added sentence, and nothing else changed.
+  const on = await cardInstructions(wakeshift);
+  const added = / To wait for a reply, call watch_messages with the number's ID[^.]*read it with get_messages\./;
+  assert.match(on, added);
+  assert.equal(on.replace(added, ""), stdio);
 });
 
 test("stdio rejects a whitespace-only API key before any backend call", async (t) => {
