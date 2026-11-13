@@ -421,7 +421,7 @@ function watchHarness(apiStub, opts = { watchMessages: true }) {
       tool(name, description, schema, annotationsOrHandler, maybeHandler) {
         const handler = typeof annotationsOrHandler === "function" ? annotationsOrHandler : maybeHandler;
         const annotations = typeof annotationsOrHandler === "function" ? {} : annotationsOrHandler;
-        tools.set(name, { schema, handler, annotations });
+        tools.set(name, { description, schema, handler, annotations });
       },
     },
     api,
@@ -430,6 +430,7 @@ function watchHarness(apiStub, opts = { watchMessages: true }) {
   return {
     calls,
     has: (name) => tools.has(name),
+    describe: (name) => tools.get(name).description,
     annotations: (name) => tools.get(name).annotations,
     // Runs the handler inside a stand-in Wakeshift call; returns its result and subscriptions.
     call: async (name, args) => {
@@ -486,6 +487,72 @@ test("watch_messages subscribes nothing when the caller can't read one of the nu
 test("watch_messages needs at least one number", async () => {
   const h = watchHarness({ getNumber });
   await assert.rejects(() => h.call("watch_messages", { number_ids: [] }));
+});
+
+test("watch_messages says to use it to wait for a reply instead of polling", () => {
+  const description = watchHarness({}).describe("watch_messages");
+  assert.match(description, /Use it to wait for a reply instead of calling get_messages repeatedly\./);
+});
+
+// ---------------------------------------------------------------------------
+// send_message points to watch_messages, only where watch_messages is offered.
+// ---------------------------------------------------------------------------
+
+const SENT = {
+  id: "m_1",
+  status: "queued",
+  channel: "sms",
+  from_number: "+14155550001",
+  to_number: "+14155551234",
+  media_urls: [],
+  reply_to_message_id: null,
+  reply_parent_unresolved: null,
+};
+const sendMessage = async () => SENT;
+const SEND = { to_number: "+14155551234", body: "hello", confirm: true };
+
+test("send_message's result names the number to watch when watch_messages is offered", async () => {
+  const h = watchHarness({ sendMessage });
+  const { result, subscriptions } = await h.call("send_message", { ...SEND, number_id: "num_a" });
+  assert.equal(result.isError, undefined);
+  assert.match(
+    result.content[0].text,
+    /To wait for their reply without polling, call watch_messages with this number \(number_ids: \["num_a"\]\)\./
+  );
+  assert.deepEqual(result.structuredContent, SENT, "the structured result is still the API's");
+  assert.deepEqual(subscriptions, [], "sending subscribes to nothing by itself");
+});
+
+test("send_message's result says where the number ID comes from when the call didn't give one", async () => {
+  const h = watchHarness({ sendMessage });
+  const { result } = await h.call("send_message", { ...SEND, agent_id: "agt_1" });
+  assert.match(
+    result.content[0].text,
+    /call watch_messages with the ID of the number this was sent from \(\+14155550001; list_numbers gives its ID\)\./
+  );
+});
+
+test("send_message doesn't mention watch_messages on a preview or a reaction", async () => {
+  const h = watchHarness({
+    sendMessage,
+    sendReaction: async (id, reaction) => ({ id: "r_1", reaction_type: reaction, message_id: id, channel: "imessage" }),
+  });
+  const preview = await h.call("send_message", { ...SEND, number_id: "num_a", confirm: false });
+  assert.equal(preview.result.isError, undefined, "preview is a success path, not an error");
+  assert.doesNotMatch(preview.result.content[0].text, /watch_messages/);
+  const reaction = await h.call("send_message", { react_to_message_id: "m_1", reaction: "love", confirm: true });
+  assert.equal(reaction.result.isError, undefined, "reaction is a success path, not an error");
+  assert.doesNotMatch(reaction.result.content[0].text, /watch_messages/);
+});
+
+test("send_message's result is unchanged when watch_messages isn't offered (stdio, or Wakeshift off)", async () => {
+  const h = watchHarness({ sendMessage }, {});
+  const { result } = await h.call("send_message", { ...SEND, number_id: "num_a" });
+  assert.equal(
+    result.content[0].text,
+    "Message sent!\n  From: +14155550001\n  To: +14155551234\n  Channel: sms\n  Status: queued\n  ID: m_1"
+  );
+  assert.deepEqual(result.structuredContent, SENT);
 });
 
 test("message.received emit ids are fixed-length and distinct for long IDs", () => {

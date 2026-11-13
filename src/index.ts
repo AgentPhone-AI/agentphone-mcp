@@ -72,7 +72,11 @@ const ICONS = [
 // Server-wide guidance for agents: cross-tool workflow, where IDs come from, and
 // which actions cost money or can't be undone. Kept distinct from the per-tool
 // descriptions so it adds orientation rather than repeating them.
-const INSTRUCTIONS = [
+//
+// watchMessages adds one sentence to the Messaging paragraph, for a server that
+// offers watch_messages (HTTP with Wakeshift on). Without it the text is the
+// same as before, and that is what stdio always sends.
+const instructionsFor = (watchMessages: boolean): string => [
   "AgentPhone gives you phone numbers and lets you text and call through them.",
   "",
   "Start with account_overview to see existing agents, numbers, webhook, and usage. The agent " +
@@ -84,7 +88,12 @@ const INSTRUCTIONS = [
     "can set on an agent.",
   "",
   "Messaging: send_message sends an SMS or iMessage from one of your numbers. get_messages, " +
-    "list_conversations, and get_conversation read history.",
+    "list_conversations, and get_conversation read history." +
+    (watchMessages
+      ? " To wait for a reply, call watch_messages with the number's ID instead of calling " +
+        "get_messages repeatedly; its result confirms the numbers being watched. After a " +
+        "notification, read the message with get_messages."
+      : ""),
   "",
   "Calling: make_conversation_call is the simplest way to place an automated call — the built-in " +
     "AI pursues a topic you give it and returns the transcript, with no webhook needed. make_call " +
@@ -238,7 +247,7 @@ async function startStdio(): Promise<void> {
     // The SDK enforces this BEFORE schema validation, which bounds the memory a
     // single malformed request can force the validator to allocate (the input
     // side of GHSA-mrhx-c7xc-m3w5). No legitimate call comes near the limit.
-    { instructions: INSTRUCTIONS, maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
+    { instructions: instructionsFor(false), maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS }
   );
   installConciseValidation(server);
   // Adapter: register each tool via registerTool so it can carry a title and an
@@ -382,12 +391,19 @@ async function startHttp(): Promise<void> {
     );
   }
 
+  // Wakeshift is on only with both AGENTPHONE_EVENTS_SECRET and WAKESHIFT_KEY
+  // set. Decided here because the instructions mention watch_messages only when
+  // it is offered; the route and the tool are set up further down.
+  const eventsSecret = process.env.AGENTPHONE_EVENTS_SECRET?.trim();
+  const wakeshiftOn = Boolean(eventsSecret) && wake.enabled;
+  const instructions = instructionsFor(wakeshiftOn);
+
   const server = new MCPServer({
     name: NAME,
     version: VERSION,
     title: TITLE,
     description: DESCRIPTION,
-    instructions: INSTRUCTIONS,
+    instructions,
     websiteUrl: WEBSITE_URL,
     icons: ICONS,
     // Serve the HTML landing page (connection/setup instructions + tool list)
@@ -449,7 +465,7 @@ async function startHttp(): Promise<void> {
         icons: ICONS,
       },
       description: DESCRIPTION,
-      instructions: INSTRUCTIONS,
+      instructions,
       documentationUrl: WEBSITE_URL,
       transport: {
         type: "streamable-http",
@@ -542,10 +558,9 @@ async function startHttp(): Promise<void> {
   };
   // Wakeshift: the AgentPhone backend reports each inbound message here, signed
   // with AGENTPHONE_EVENTS_SECRET, and this server emits message.received.
-  // Everything Wakeshift does (this route, watch_messages, attach) is on only
-  // with both the secret and WAKESHIFT_KEY set. See docs/backend-events.md.
-  const eventsSecret = process.env.AGENTPHONE_EVENTS_SECRET?.trim();
-  const wakeshiftOn = Boolean(eventsSecret) && wake.enabled;
+  // Everything Wakeshift does (this route, watch_messages and the mentions of
+  // it, attach) is on only with both the secret and WAKESHIFT_KEY set. See
+  // docs/backend-events.md.
   if (eventsSecret && !wake.enabled) {
     console.error("AGENTPHONE_EVENTS_SECRET is set but WAKESHIFT_KEY is not; Wakeshift is off.");
   } else if (wake.enabled && !eventsSecret) {

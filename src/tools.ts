@@ -347,8 +347,9 @@ function buildCallControls(args: {
 }
 
 /**
- * watchMessages: offer watch_messages. Only when Wakeshift is on and the
- * AgentPhone backend pushes inbound messages (HTTP transport); see index.ts.
+ * watchMessages: offer watch_messages, and have send_message's result point to
+ * it. Only when Wakeshift is on and the AgentPhone backend pushes inbound
+ * messages (HTTP transport); see index.ts.
  */
 export function registerTools(
   server: ToolRegistrar,
@@ -892,6 +893,16 @@ export function registerTools(
         if (result.reply_parent_unresolved) {
           lines.push(`  Note: couldn't thread under the reply parent; delivered without threading.`);
         }
+        // Only where watch_messages is offered. An agent that has just sent a
+        // text is the one waiting for a reply, so this is where it learns it
+        // doesn't have to poll. Text only: structuredContent stays the API result.
+        if (opts.watchMessages) {
+          lines.push(
+            number_id
+              ? `To wait for their reply without polling, call watch_messages with this number (number_ids: ["${number_id}"]).`
+              : `To wait for their reply without polling, call watch_messages with the ID of the number this was sent from (${result.from_number}; list_numbers gives its ID).`
+          );
+        }
         return ok(lines.join("\n"), result);
       } catch (e) {
         return err(e);
@@ -1090,10 +1101,12 @@ export function registerTools(
     server.tool(
       "watch_messages",
       "Watch one or more of your numbers for inbound messages (SMS, iMessage, or WhatsApp), " +
-        "identified by their number IDs. To watch several numbers, pass them all in one call " +
+        "identified by their number IDs. Use it to wait for a reply instead of calling " +
+        "get_messages repeatedly. " +
+        "To watch several numbers, pass them all in one call " +
         `rather than calling once per number. A watch lasts until ${WATCH_TTL} pass with no new ` +
         "message on that number; calling again for the same number extends it. Returns once the " +
-        "watches are set up; read messages with get_messages.",
+        "watches are set up; when a message arrives, read it with get_messages.",
       {
         number_ids: z
           .array(z.string())
