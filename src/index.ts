@@ -91,8 +91,8 @@ const instructionsFor = (watchMessages: boolean): string => [
     "list_conversations, and get_conversation read history." +
     (watchMessages
       ? " To wait for a reply, call watch_messages with the number's ID instead of calling " +
-        "get_messages repeatedly; its result says whether this conversation will be told when " +
-        "a message arrives, and you then read it with get_messages."
+        "get_messages repeatedly; its result confirms the numbers being watched. After a " +
+        "notification, read the message with get_messages."
       : ""),
   "",
   "Calling: make_conversation_call is the simplest way to place an automated call — the built-in " +

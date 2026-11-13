@@ -691,7 +691,7 @@ test("the instructions mention watch_messages only where it is offered (HTTP wit
 
   // HTTP with Wakeshift on: one added sentence, and nothing else changed.
   const on = await cardInstructions(wakeshift);
-  const added = / To wait for a reply, call watch_messages with the number's ID[^.]*read it with get_messages\./;
+  const added = / To wait for a reply, call watch_messages with the number's ID instead of calling get_messages repeatedly; its result confirms the numbers being watched\. After a notification, read the message with get_messages\./;
   assert.match(on, added);
   assert.equal(on.replace(added, ""), stdio);
 });

@@ -248,7 +248,7 @@ Retrieve the secret from the AgentPhone dashboard to verify webhook signatures.
 | `AGENTPHONE_ALLOW_ANONYMOUS` | No | Explicit HTTP server-key fallback; default off, ignored when OAuth is enabled. See the self-hosting warning above |
 | `AGENTPHONE_BASE_URL` | No | Override the API base URL (defaults to `https://api.agentphone.ai`) |
 | `PORT` | No | Port for HTTP mode (defaults to `3000`; set with `PORT`) |
-| `WAKESHIFT_KEY` | No | HTTP only, with `AGENTPHONE_EVENTS_SECRET`. Wakeshift app key; adds `watch_messages`. Without both, nothing is sent to Wakeshift |
+| `WAKESHIFT_KEY` | No | HTTP only, with `AGENTPHONE_EVENTS_SECRET`. Wakeshift app key; adds `watch_messages` and points agents to it from the server instructions and `send_message`'s result. Without both, nothing is sent to Wakeshift |
 | `AGENTPHONE_EVENTS_SECRET` | No | HTTP only, with `WAKESHIFT_KEY`. Signing secret for backend message notifications; see [docs/backend-events.md](docs/backend-events.md) |
 
 ## Development

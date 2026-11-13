@@ -538,8 +538,10 @@ test("send_message doesn't mention watch_messages on a preview or a reaction", a
     sendReaction: async (id, reaction) => ({ id: "r_1", reaction_type: reaction, message_id: id, channel: "imessage" }),
   });
   const preview = await h.call("send_message", { ...SEND, number_id: "num_a", confirm: false });
+  assert.equal(preview.result.isError, undefined, "preview is a success path, not an error");
   assert.doesNotMatch(preview.result.content[0].text, /watch_messages/);
   const reaction = await h.call("send_message", { react_to_message_id: "m_1", reaction: "love", confirm: true });
+  assert.equal(reaction.result.isError, undefined, "reaction is a success path, not an error");
   assert.doesNotMatch(reaction.result.content[0].text, /watch_messages/);
 });
 
