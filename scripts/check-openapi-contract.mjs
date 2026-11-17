@@ -10,6 +10,8 @@
  * release (`npm run check:contract`) or as a non-blocking CI job. Override the
  * spec URL with OPENAPI_URL.
  */
+import { LANGUAGE_CODES } from "../dist/tools.js";
+
 const OPENAPI_URL = process.env.OPENAPI_URL || "https://api.agentphone.ai/openapi.json";
 
 const problems = [];
@@ -49,6 +51,23 @@ function itemProps(spec, schemaName, arrayField = "data") {
   return itemName ? props(spec, itemName) : {};
 }
 
+
+// --- Agent language enum (create_agent / update_agent) ---
+{
+  for (const schemaName of ["CreateAgentRequest", "UpdateAgentRequest"]) {
+    const values = props(spec, schemaName).language?.enum;
+    require$(Array.isArray(values), `${schemaName}.language has no enum in the spec`);
+    if (!Array.isArray(values)) continue;
+    const tool = new Set(LANGUAGE_CODES);
+    const api = new Set(values);
+    const missing = values.filter((v) => !tool.has(v));
+    const extra = LANGUAGE_CODES.filter((v) => !api.has(v));
+    require$(
+      missing.length === 0 && extra.length === 0,
+      `LANGUAGE_CODES drifted from ${schemaName}.language: missing [${missing.join(", ")}], extra [${extra.join(", ")}]`
+    );
+  }
+}
 // --- Cursor-paged number messages (get_messages) ---
 {
   const p = "/v1/numbers/{number_id}/messages";

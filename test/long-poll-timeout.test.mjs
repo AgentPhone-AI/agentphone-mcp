@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { AgentPhoneAPI } from "../dist/api.js";
 
-// Long-polling (get_call wait/timeout, make_conversation_call
+// Long-polling (get_call wait/timeout, make_call with a topic
 // waitForCompletion/maxWaitSeconds) was removed in tasks#192: the backend has no
 // completion wait, so the client no longer arms an extended abort timer. What
 // must remain is the ordinary, bounded request timeout on every call.
@@ -38,7 +38,7 @@ test("get_call arms only the ordinary request timeout (#192)", async () => {
   assert.equal(delay, 30_000);
 });
 
-test("make_conversation_call arms only the ordinary request timeout (#192)", async () => {
+test("make_call with a topic (makeConversationCall) arms only the ordinary request timeout (#192)", async () => {
   const delay = await abortDelayFor((api) =>
     api.makeConversationCall("agent_1", "+14155550123", "Prompt"),
   );

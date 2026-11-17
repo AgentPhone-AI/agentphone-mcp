@@ -109,7 +109,6 @@ const ARGS = {
   get_call: { call_id: "call_1" },
   end_call: { call_id: "call_1" },
   make_call: { agent_id: "agt_1", to_number: "+14155550123", confirm: true },
-  make_conversation_call: { agent_id: "agt_1", to_number: "+14155550123", topic: "x", confirm: true },
   list_agents: {},
   create_agent: { name: "X" },
   update_agent: { agent_id: "agt_1" },
@@ -381,7 +380,7 @@ test("end_call ends a call and tolerates an already-ended call (#204)", async ()
 });
 
 test("call tools forward recording/variables/model-tier/screening controls (#204)", async () => {
-  for (const tool of ["make_call", "make_conversation_call"]) {
+  for (const tool of ["make_call", "make_call+topic"]) {
     let body;
     const stub = tool === "make_call"
       ? { makeCall: async (a, n, g, f, v, opts) => { body = opts; return { id: "call_1", fromNumber: "+1", toNumber: "+2", direction: "outbound", status: "ringing", startedAt: "t", retellCallId: null }; } }
@@ -392,9 +391,9 @@ test("call tools forward recording/variables/model-tier/screening controls (#204
       disable_recording: true, variables: { customerName: "Sam" }, model_tier: "max",
       call_screening_identity: "Acme", call_screening_purpose: "reminder",
       confirm: true,
-      ...(tool === "make_conversation_call" ? { topic: "x" } : {}),
+      ...(tool === "make_call+topic" ? { topic: "x" } : {}),
     };
-    const r = await h.call(tool, args);
+    const r = await h.call("make_call", args);
     assert.equal(r.isError, undefined, `${tool} errored`);
     assert.equal(body.disableRecording, true, `${tool}: disableRecording`);
     assert.deepEqual(body.variables, { customerName: "Sam" }, `${tool}: variables`);
@@ -616,15 +615,15 @@ test("outbound tools require per-action confirmation before contacting anyone (d
   r = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", confirm: true });
   assert.equal(placed, 1, "call placed with confirm=true");
 
-  // make_conversation_call: preview shows the destination and topic.
+  // make_call with a topic: preview shows the destination and topic.
   let convPlaced = 0;
   h = harness(makeStub({ makeConversationCall: async () => { convPlaced++; return call; } }));
-  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "a quick survey" });
+  r = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "a quick survey" });
   assert.equal(r.structuredContent.confirmationRequired, true);
   assert.match(r.content[0].text, /\+14155550123/);
   assert.match(r.content[0].text, /a quick survey/);
   assert.equal(convPlaced, 0);
-  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success);
+  assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(r.structuredContent).success);
 
   // send_message: single recipient preview, group preview with count, reaction preview.
   let sent = 0;
@@ -736,7 +735,7 @@ test("hosted agents get an enforced AI disclosure on create and update (director
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 32);
+  assert.equal(registered.size, 31);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -764,19 +763,19 @@ test("list_webhook_deliveries advertises the documented delivery fields", () => 
   assert.equal(entry.createdAt.safeParse(null).success, false);
 });
 
-test("make_conversation_call returns immediately without any wait inputs (#192)", async () => {
+test("make_call with a topic returns immediately without any wait inputs (#192)", async () => {
   const h = harness(makeStub());
   // The schema must not advertise the removed wait/max_wait_seconds options.
-  const schema = h.schema("make_conversation_call");
+  const schema = h.schema("make_call");
   assert.ok(!("wait" in schema), "wait input must be removed");
   assert.ok(!("max_wait_seconds" in schema), "max_wait_seconds input must be removed");
   // Normal call returns the initiated state immediately, pointing at get_call.
-  const r = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155550123", topic: "x", confirm: true });
+  const r = await h.call("make_call", { agent_id: "a", to_number: "+14155550123", topic: "x", confirm: true });
   assert.equal(r.isError, undefined);
   assert.match(r.content[0].text, /initiated/);
   assert.match(r.content[0].text, /get_call/);
   assert.doesNotMatch(r.content[0].text, /in progress|wait elapsed/);
-  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success);
+  assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(r.structuredContent).success);
 });
 
 test("get_call takes only call_id, with no wait/timeout, and never long-polls (#192)", async () => {
@@ -924,11 +923,11 @@ test("alternate success branches still return schema-valid structured content", 
   assert.equal(r.isError, undefined);
   assert.ok(OUTPUT_SCHEMAS.get_webhook.safeParse(r.structuredContent).success, "get_webhook/none");
 
-  // make_conversation_call returns the initiated call immediately
+  // make_call with a topic returns the initiated AI call immediately
   h = harness(makeStub());
-  r = await h.call("make_conversation_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x", confirm: true });
+  r = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155550123", topic: "x", confirm: true });
   assert.equal(r.isError, undefined);
-  assert.ok(OUTPUT_SCHEMAS.make_conversation_call.safeParse(r.structuredContent).success, "mcc/initiated");
+  assert.ok(OUTPUT_SCHEMAS.make_call.safeParse(r.structuredContent).success, "make_call+topic/initiated");
 
   // empty list variants that don't carry a `total`
   const emptyStub = {

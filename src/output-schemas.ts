@@ -379,17 +379,7 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .refine((d) => d.confirmationRequired === true || typeof d.id === "string", {
       message: "a placed call must include an id; only a confirmation preview may omit it",
     })
-    .describe("The initiated outbound call, or a confirmation-required preview when confirm was not set."),
-
-  make_conversation_call: callObject
-    .extend({
-      id: z.string().optional().describe("The call's ID (absent on a confirmation preview)."),
-      confirmationRequired: z.boolean().optional().describe("True when the call was only previewed (confirm was not true); re-call with confirm=true to place it."),
-    })
-    .refine((d) => d.confirmationRequired === true || typeof d.id === "string", {
-      message: "a placed call must include an id; only a confirmation preview may omit it",
-    })
-    .describe("The call (with transcript turns when available), or a confirmation-required preview when confirm was not set."),
+    .describe("The initiated outbound call (with transcript turns when available for an AI topic call), or a confirmation-required preview when confirm was not set."),
 
   list_agents: z
     .object({ data: z.array(agentObject).describe("Agents on this page."), ...listMeta })

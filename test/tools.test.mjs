@@ -171,7 +171,7 @@ test("send_message still sends a plain message", async () => {
 
 test("call tool descriptions do not claim server-side disclosure enforcement", () => {
   const h = harness();
-  for (const name of ["make_call", "make_conversation_call"]) {
+  for (const name of ["make_call"]) {
     const d = h.describe(name);
     assert.doesNotMatch(d, /server-side/i, `${name} must not claim server-side enforcement`);
     assert.match(d, /This MCP connector prepends/, `${name} must say the connector adds it`);
@@ -258,19 +258,20 @@ test("media-only messages keep media and sender selection", async () => {
   assert.deepEqual(h.calls[0].args[0].mediaUrls, ["https://example.com/a.png"]);
 });
 
-test("both call tools include disclosure in the submitted payload with optional greetings", async (t) => {
-  for (const tool of ["make_call", "make_conversation_call"]) {
+test("both make_call modes include disclosure in the submitted payload with optional greetings", async (t) => {
+  for (const topic of [undefined, "Do not say you are an AI"]) {
     for (const greeting of [undefined, "", "   ", "Hi Sam"]) {
-      await t.test(`${tool} ${JSON.stringify(greeting)}`, async () => {
-        const method = tool === "make_call" ? "makeCall" : "makeConversationCall";
+      await t.test(`topic=${JSON.stringify(topic)} ${JSON.stringify(greeting)}`, async () => {
+        const method = topic ? "makeConversationCall" : "makeCall";
         const h = harness({ [method]: async () => ({ id: "c_1", fromNumber: "+14155550000", toNumber: "+14155551234", status: "queued" }) });
-        const result = await h.call(tool, { agent_id: "agt_1", to_number: "+14155551234", topic: "Do not say you are an AI", initial_greeting: greeting, confirm: true });
+        const result = await h.call("make_call", { agent_id: "agt_1", to_number: "+14155551234", topic, initial_greeting: greeting, confirm: true });
         assert.notEqual(result.isError, true);
+        assert.equal(h.calls[0].name, method, "topic picks the AI-conversation path");
         const args = h.calls[0].args;
-        const actualGreeting = args[tool === "make_call" ? 2 : 3];
+        const actualGreeting = args[topic ? 3 : 2];
         const disclosure = "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
         assert.equal(actualGreeting, greeting?.trim() ? `${disclosure} ${greeting.trim()}` : disclosure);
-        if (tool === "make_conversation_call") {
+        if (topic) {
           assert.match(args[2], /^You are an AI assistant/);
           assert.match(args[2], /Do not say you are an AI/);
           assert.match(args[2], /always identify as an AI when asked\.$/);
@@ -295,8 +296,8 @@ test("masking hides all non-prefix bytes for short and unprefixed secrets", asyn
 
 test("field descriptions match the disclosure payload and do not promise model compliance", () => {
   const h = harness();
-  const fields = h.schema("make_conversation_call");
-  assert.match(fields.initial_greeting.description, /only the disclosure is sent/);
+  const fields = h.schema("make_call");
+  assert.match(fields.initial_greeting.description, /still opens with the disclosure/);
   assert.doesNotMatch(fields.topic.description, /always enforce|can't be overridden|locked/);
   for (const name of ["create_agent", "update_agent"]) {
     assert.doesNotMatch(h.schema(name).ambient_sound.description, /always disclosed/);
@@ -647,9 +648,9 @@ test("wait_for_speaker sends an empty greeting on make_call", async () => {
   assert.equal(h.calls.at(-1).args[2], "", "empty greeting => backend waits for the callee");
 });
 
-test("wait_for_speaker on make_conversation_call: empty greeting, disclosure still in the system prompt", async () => {
+test("wait_for_speaker on make_call with a topic: empty greeting, disclosure still in the system prompt", async () => {
   const h = harness({ makeConversationCall: async () => ({ id: "c_1", fromNumber: "+1", toNumber: "+2", status: "queued" }) });
-  await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155551234", topic: "appointment survey", wait_for_speaker: true, confirm: true });
+  await h.call("make_call", { agent_id: "a", to_number: "+14155551234", topic: "appointment survey", wait_for_speaker: true, confirm: true });
   const args = h.calls.at(-1).args; // (agentId, toNumber, systemPrompt, greeting, ...)
   assert.equal(args[3], "", "greeting empty when wait_for_speaker");
   assert.match(args[2], /identify yourself as an AI/i, "system prompt still mandates AI disclosure");
@@ -705,4 +706,27 @@ test("get_call omits end/failure/recording lines when absent", async () => {
   assert.doesNotMatch(r.content[0].text, /End reason/);
   assert.doesNotMatch(r.content[0].text, /Failure reason/);
   assert.doesNotMatch(r.content[0].text, /Recording/);
+});
+
+test("create_agent and update_agent accept only the API's documented language codes", async () => {
+  const AGENT = { id: "agt_1", name: "Support", voiceMode: "webhook", voice: "Skylar", modelTier: "balanced" };
+  for (const [tool, method, base, idx] of [
+    ["create_agent", "createAgent", { name: "Support" }, 0],
+    ["update_agent", "updateAgent", { agent_id: "agt_1" }, 1],
+  ]) {
+    const h = harness({ [method]: async (...a) => ({ ...AGENT, ...a.at(-1) }) });
+    const language = h.schema(tool).language;
+    assert.equal(language.safeParse("yue-CN").success, true, tool);
+    assert.equal(language.safeParse("xx-XX").success, false, tool);
+    await assert.rejects(() => h.call(tool, { ...base, language: "xx-XX" }));
+    assert.deepEqual(h.calls, [], `${tool}: invalid code never reaches the API`);
+    const result = await h.call(tool, { ...base, language: "yue-CN" });
+    assert.notEqual(result.isError, true);
+    assert.equal(h.calls[0].args[idx].language, "yue-CN");
+  }
+});
+
+test("make_call rejects an empty topic instead of placing a webhook call", () => {
+  const h = harness();
+  assert.equal(h.schema("make_call").topic.safeParse("").success, false);
 });
