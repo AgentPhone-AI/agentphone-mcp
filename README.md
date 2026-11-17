@@ -161,7 +161,7 @@ The optional anonymous mode instead uses the configured server API key.
 
 ## Authorization & AI disclosure
 
-- **Every outbound call and message is individually authorized by the user.** `make_call`, `make_conversation_call`, and `send_message` do nothing unless `confirm=true` is passed — without it they return a preview of the **full** destination(s) and content (all group recipients, the complete message body, every media URL, and any interactive payload) for the user to approve first (the same two-step pattern `buy_number` uses). There is no bulk-send path that skips a person in the loop.
+- **Every outbound call and message is individually authorized by the user.** `make_call` and `send_message` do nothing unless `confirm=true` is passed — without it they return a preview of the **full** destination(s) and content (all group recipients, the complete message body, every media URL, and any interactive payload) for the user to approve first (the same two-step pattern `buy_number` uses). There is no bulk-send path that skips a person in the loop.
 - **The connector adds AI self-identification to what it submits.** Outbound calls placed through the call tools open with an AI disclosure that no argument disables. When a **hosted** agent is created or updated through this connector, the connector also prepends the disclosure to its system prompt, opening line, and voicemail so they identify as AI on inbound calls and voicemail. This is disclosure text and prompt instruction that the connector submits — it guides, but does not itself guarantee, model behavior or backend playback, and it only covers agents created/updated through this connector (the AgentPhone backend is the authoritative enforcer for all inbound calls). Webhook agents (your own backend, which may be human-staffed) are left untouched.
 - **No audio is exposed.** Voice synthesis happens only inside live calls; no tool returns audio files or call recordings. (`list_voices` includes a static voice-sample `preview_audio_url`, which is a library clip, not call audio.)
 
@@ -189,6 +189,7 @@ The optional anonymous mode instead uses the configured server API key.
 | `check_capabilities` | Check which channels a phone number can receive (iMessage / SMS / RCS) before sending |
 | `check_readiness` | Check a number is ready before sending/calling: active + assigned + channel-capable are hard blockers; A2P/10DLC registration and recipient reachability are warnings. Returns `ready`, blockers, warnings, and next steps (credit/concurrency are enforced at send time, not pre-checkable) |
 | `get_messages` | Get messages for a specific number. Page older history with `cursor` (from `nextCursor`); `before`/`after` are optional time filters. |
+| `watch_messages` | Wait for inbound messages on one or more numbers instead of polling `get_messages`. Only offered on the hosted HTTP server with Wakeshift enabled (see `WAKESHIFT_KEY`). |
 | `list_conversations` | List SMS conversations. Pass `agent_id` to filter by agent. |
 | `get_conversation` | Get a conversation with a bounded tail of recent messages |
 | `get_conversation_messages` | Page through a conversation's full message history with `cursor` |
@@ -208,8 +209,7 @@ The optional anonymous mode instead uses the configured server API key.
 | `list_calls` | List calls. Scope by `agent_id` **or** `number_id`, or filter the account-wide list by status/direction/search. Scope and filters can't be combined. |
 | `get_call` | Get call details and transcript, including end reason, failure reason when available, and whether a recording is available (the recording audio/link is never exposed) |
 | `end_call` | End an in-progress call (safe to retry; ending a finished call is a no-op) |
-| `make_call` | Place an outbound call (webhook-driven). **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` (connect silently and let the person speak first) |
-| `make_conversation_call` | Place a call with built-in AI conversation — no webhook needed. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` |
+| `make_call` | Place an outbound call. Pass `topic` and the built-in AI holds the conversation (no webhook needed); omit it for a webhook-driven call. **Requires `confirm=true`** (previews first — every call is individually authorized by the user). Supports recording, variables, model tier, call-screening controls, and `wait_for_speaker` (connect silently and let the person speak first) |
 
 ### Agents
 

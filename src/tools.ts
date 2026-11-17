@@ -113,6 +113,18 @@ const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 const COUNTRY_REGEX = /^[A-Z]{2}$/;
 const AREA_CODE_REGEX = /^\d{3}$/;
 
+// Values from CreateAgentRequest.language and UpdateAgentRequest.language in the
+// API's OpenAPI spec. npm run check:contract verifies this list against the live spec.
+export const LANGUAGE_CODES = [
+  "af-ZA", "ar-SA", "az-AZ", "bg-BG", "bs-BA", "ca-ES", "cs-CZ", "cy-GB", "da-DK", "de-DE",
+  "el-GR", "en-AU", "en-GB", "en-IN", "en-NZ", "en-US", "es-419", "es-ES", "fa-IR", "fi-FI",
+  "fil-PH", "fr-CA", "fr-FR", "gl-ES", "he-IL", "hi-IN", "hr-HR", "hu-HU", "hy-AM", "id-ID",
+  "is-IS", "it-IT", "ja-JP", "kk-KZ", "kn-IN", "ko-KR", "lt-LT", "lv-LV", "mk-MK", "mr-IN",
+  "ms-MY", "ne-NP", "nl-BE", "nl-NL", "no-NO", "pl-PL", "pt-BR", "pt-PT", "ro-RO", "ru-RU",
+  "sk-SK", "sl-SI", "sr-RS", "sv-SE", "sw-KE", "ta-IN", "th-TH", "tr-TR", "uk-UA", "ur-IN",
+  "vi-VN", "yue-CN", "zh-CN",
+] as const;
+
 function validateE164(phone: string): string | null {
   if (!E164_REGEX.test(phone))
     return "Phone number must be in E.164 format, e.g. +14155551234";
@@ -313,7 +325,7 @@ function pageFooter(
     : "\n\nMore results exist, but the API did not return a next cursor. Narrow the range with before/after; note that time filters can omit messages that share a page boundary.";
 }
 
-// Optional per-call controls shared by make_call and make_conversation_call,
+// Optional per-call controls for make_call (both webhook and AI-topic modes),
 // forwarded to POST /v1/calls. Each is omitted from the request when unset so the
 // backend default stands.
 function callControlInputs() {
@@ -1337,7 +1349,7 @@ export function registerTools(
     {
       call_id: z
         .string()
-        .describe("The ID of the call to fetch, from list_calls or from a make_call / make_conversation_call response."),
+        .describe("The ID of the call to fetch, from list_calls or from a make_call response."),
     },
     { readOnlyHint: true, idempotentHint: true },
     async ({ call_id }) => {
@@ -1394,7 +1406,7 @@ export function registerTools(
     {
       call_id: z
         .string()
-        .describe("The ID of the call to end, from list_calls or a make_call / make_conversation_call response."),
+        .describe("The ID of the call to end, from list_calls or a make_call response."),
     },
     // Ends a live call (irreversible for that call) and affects the external
     // phone session, but repeating on an already-ended call is a no-op.
@@ -1412,39 +1424,55 @@ export function registerTools(
 
   server.tool(
     "make_call",
-    "Initiate an outbound, webhook-driven phone call where your backend handles the " +
-      "conversation logic.\n\n" +
+    "Place an outbound phone call from one of your agent's numbers. Two modes, chosen by topic:\n" +
+      "- With topic: the built-in AI holds the conversation on its own, pursuing the topic you give it " +
+      "(scheduling, surveys, follow-ups, etc.). No webhook needed. This is the simplest way to place " +
+      "an automated call.\n" +
+      "- Without topic: a webhook-driven call where your backend handles the conversation logic. The " +
+      "agent must have a webhook configured.\n\n" +
       "Each call is individually authorized by the user: this returns a preview and places no call " +
-      "unless confirm=true, so confirm the destination with the user before dialing.\n" +
-      "The agent must have a phone number attached and a webhook configured. " +
-      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API. " +
-      "The one exception is wait_for_speaker: it connects silently and sends no greeting, so your call " +
-      "logic must have the agent identify as an AI when it first speaks. Calls made directly through the " +
-      "AgentPhone API or SDKs bypass this connector's disclosure logic. " +
-      "Returns the new call's ID, status, and the numbers it connects.",
+      "unless confirm=true, so confirm the destination (and topic) with the user before dialing.\n" +
+      "The agent must have a phone number attached.\n" +
+      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API, " +
+      "and with a topic it also wraps the topic in AI identity instructions (no argument removes them). " +
+      "wait_for_speaker connects silently and sends no greeting: with a topic the identity instructions " +
+      "still apply; without one, your call logic must have the agent identify as an AI when it first " +
+      "speaks. These guide the model but do not guarantee its behavior. Calls made directly through " +
+      "the AgentPhone API or SDKs bypass this connector's disclosure logic.\n" +
+      "Returns immediately with the new call's ID, status, and the numbers it connects. Use get_call " +
+      "with the call ID to fetch the transcript once the call has progressed.",
     {
       agent_id: z
         .string()
-        .describe("The agent placing the call (ID from list_agents). The agent must have a phone number attached and a webhook configured."),
+        .describe("The agent placing the call (ID from list_agents). It must have a phone number attached, and a webhook configured when no topic is given."),
       to_number: z
         .string()
         .describe("The phone number to call, written in full international form with a country code, like +14155551234."),
+      topic: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "The conversation goal for the built-in AI to pursue. Setting it makes this an autonomous AI " +
+            "call; omit it for a webhook-driven call. Embedded as the call objective within " +
+            "connector-supplied AI identity instructions. Be specific about what to discuss and any goals."
+        ),
       initial_greeting: z
         .string()
         .optional()
         .describe(
           "What the agent says right after the required AI disclosure when the call connects. If " +
-            "omitted, the call still opens with the disclosure and your webhook drives what comes next. " +
-            "Ignored when wait_for_speaker is true."
+            "omitted, the call still opens with the disclosure. Ignored when wait_for_speaker is true."
         ),
       wait_for_speaker: z
         .boolean()
         .default(false)
         .describe(
           "When true, the call connects silently and the agent waits for the person to speak first " +
-            "instead of opening with a greeting (no initial_greeting is sent). Your webhook/agent logic " +
-            "must still have the agent identify itself as an AI when it responds. Default false: the " +
-            "call opens with the AI disclosure."
+            "instead of opening with a greeting (no initial_greeting is sent). With a topic, the AI " +
+            "identity instructions still apply; without one, your webhook/agent logic must have the " +
+            "agent identify itself as an AI when it responds. Default false: the call opens with the " +
+            "AI disclosure."
         ),
       from_number_id: z
         .string()
@@ -1458,122 +1486,44 @@ export function registerTools(
       ...confirmField(),
     },
     { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, initial_greeting, wait_for_speaker, from_number_id, voice, confirm, ...controls }) => {
+    async ({ agent_id, to_number, topic, initial_greeting, wait_for_speaker, from_number_id, voice, confirm, ...controls }) => {
       const phoneErr = validateE164(to_number);
       if (phoneErr) return err(new Error(phoneErr));
 
       if (!confirm) {
+        const via = from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : "";
+        if (topic) {
+          return confirmationPreview(
+            `This will place an autonomous AI phone call to ${to_number}${via}, ` +
+              `where the assistant (identifying itself as an AI) will hold a conversation about: "${topic}".` +
+              (wait_for_speaker ? " The call waits silently for the person to speak first." : "")
+          );
+        }
         return confirmationPreview(
-          `This will place an outbound call to ${to_number}` +
-            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}. ` +
+          `This will place an outbound call to ${to_number}${via}. ` +
             (wait_for_speaker
               ? "The call waits silently for the person to speak first; the agent identifies as an AI when it responds."
               : `The call opens with the AI disclosure${initial_greeting ? `, then: "${initial_greeting}"` : "."}`)
         );
       }
 
+      const greeting = wait_for_speaker ? "" : withDisclosure(initial_greeting);
+      const callControls = buildCallControls(controls);
       try {
-        const result = await api.makeCall(
-          agent_id,
-          to_number,
-          wait_for_speaker ? "" : withDisclosure(initial_greeting),
-          from_number_id,
-          voice,
-          buildCallControls(controls),
-        );
-        return ok(
-          `Call initiated!\n  From: ${result.fromNumber}\n  To: ${result.toNumber}\n  Call ID: ${result.id}\n  Status: ${result.status}`,
-          result
-        );
-      } catch (e) {
-        return err(e);
-      }
-    }
-  );
-
-  server.tool(
-    "make_conversation_call",
-    "Place a phone call where the AI has an autonomous conversation about a given topic — " +
-      "scheduling, surveys, follow-ups, etc. No webhook setup needed.\n\n" +
-      "Each call is individually authorized by the user: this returns a preview and places no call " +
-      "unless confirm=true. Confirm the destination and topic with the user before dialing.\n" +
-      "The agent must have a phone number attached.\n" +
-      "This MCP connector prepends an automated-assistant disclosure to the greeting sent to the API " +
-      "and adds AI identity instructions around the topic. wait_for_speaker skips the spoken greeting " +
-      "prefix (the call waits for the callee), but the AI identity instructions still apply; no argument " +
-      "removes those. These guide the model but do not guarantee its behavior. Calls made directly " +
-      "through the AgentPhone API or SDKs bypass this connector's disclosure logic.\n" +
-      "This returns immediately with the call's ID and initial status. The call then runs on its own; " +
-      "use get_call with the call ID to fetch the transcript once it has progressed.",
-    {
-      agent_id: z
-        .string()
-        .describe("The agent that will place the call (ID from list_agents). It must have a phone number attached."),
-      to_number: z
-        .string()
-        .describe("The phone number to call, written in full international form with a country code, like +14155551234."),
-      topic: z.string().describe(
-        "The conversation goal for the assistant to pursue. Embedded as the call objective within " +
-          "connector-supplied AI identity instructions. These instructions guide the model; they do " +
-          "not guarantee its behavior. Be specific about what to discuss and any goals."
-      ),
-      initial_greeting: z
-        .string()
-        .optional()
-        .describe("Text appended after the connector’s AI disclosure in the greeting sent to the API. If omitted, only the disclosure is sent. Ignored when wait_for_speaker is true."),
-      wait_for_speaker: z
-        .boolean()
-        .default(false)
-        .describe(
-          "When true, the call connects silently and the assistant waits for the person to speak first " +
-            "instead of opening with a greeting. The assistant still identifies as an AI when it responds: " +
-            "the connector's AI identity instructions wrap the topic regardless. Default false."
-        ),
-      from_number_id: z
-        .string()
-        .optional()
-        .describe("ID of the specific number to call from (from list_numbers), when the agent has more than one."),
-      voice: z
-        .string()
-        .optional()
-        .describe("A voice ID (from list_voices) to override the agent's default voice for this call."),
-      ...callControlInputs(),
-      ...confirmField(),
-    },
-    { readOnlyHint: false, destructiveHint: true, openWorldHint: true, idempotentHint: false },
-    async ({ agent_id, to_number, topic, initial_greeting, wait_for_speaker, from_number_id, voice, confirm, ...controls }) => {
-      const phoneErr = validateE164(to_number);
-      if (phoneErr) return err(new Error(phoneErr));
-
-      if (!confirm) {
-        return confirmationPreview(
-          `This will place an autonomous AI phone call to ${to_number}` +
-            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}, ` +
-            `where the assistant (identifying itself as an AI) will hold a conversation about: "${topic}".` +
-            (wait_for_speaker ? " The call waits silently for the person to speak first." : "")
-        );
-      }
-
-      try {
-        const result = await api.makeConversationCall(
-          agent_id,
-          to_number,
-          lockedSystemPrompt(topic),
-          wait_for_speaker ? "" : withDisclosure(initial_greeting),
-          from_number_id,
-          voice,
-          buildCallControls(controls),
-        );
-
+        const result = topic
+          ? await api.makeConversationCall(agent_id, to_number, lockedSystemPrompt(topic), greeting, from_number_id, voice, callControls)
+          : await api.makeCall(agent_id, to_number, greeting, from_number_id, voice, callControls);
         return ok(
           [
-            `Conversation call initiated!`,
+            topic ? `AI conversation call initiated!` : `Call initiated!`,
             `  From: ${result.fromNumber}`,
             `  To: ${result.toNumber}`,
             `  Call ID: ${result.id}`,
             `  Status: ${result.status}`,
             ``,
-            `The AI will have an autonomous conversation about the topic you provided.\nUse get_call with the call ID to check the transcript once the call ends.`,
+            topic
+              ? `The AI will hold the conversation on its own. Use get_call with the call ID to check the transcript.`
+              : `Your webhook drives the conversation. Use get_call with the call ID to check the transcript.`,
           ].join("\n"),
           result
         );
@@ -1708,9 +1658,9 @@ export function registerTools(
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to use the server default (about 10 minutes)."),
       language: z
-        .string()
+        .enum(LANGUAGE_CODES)
         .optional()
-        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
+        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'. Must be one of the API's supported codes."),
     },
     { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
     async ({ name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, call_screening_identity, call_screening_purpose, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {
@@ -1843,9 +1793,9 @@ export function registerTools(
         .optional()
         .describe("How long the agent waits through continuous caller silence before ending the call. Omit to keep the agent's current timeout."),
       language: z
-        .string()
+        .enum(LANGUAGE_CODES)
         .optional()
-        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'."),
+        .describe("BCP-47 locale for speech recognition and synthesis, e.g. 'en-US', 'es-ES', 'ja-JP'. Must be one of the API's supported codes."),
     },
     { idempotentHint: true },
     async ({ agent_id, name, description, voice_mode, system_prompt, begin_message, voice, model_tier, transfer_number, voicemail_message, call_screening_identity, call_screening_purpose, voice_speed, interruption_sensitivity, enable_backchannel, enable_messaging, stt_mode, ambient_sound, denoising_mode, max_silence_ms, language }) => {

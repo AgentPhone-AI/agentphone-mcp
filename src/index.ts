@@ -95,13 +95,13 @@ const instructionsFor = (watchMessages: boolean): string => [
         "notification, read the message with get_messages."
       : ""),
   "",
-  "Calling: make_conversation_call is the simplest way to place an automated call — the built-in " +
-    "AI pursues a topic you give it and returns the transcript, with no webhook needed. make_call " +
-    "is for webhook-driven flows you control. The connector prepends an AI disclosure to the " +
-    "greeting of calls its call tools place; the one exception is wait_for_speaker, which connects " +
-    "silently (the agent must then identify as an AI when it speaks — make_conversation_call still " +
-    "enforces this via its system prompt). Calls placed directly through the AgentPhone API or SDKs " +
-    "bypass this connector's disclosure logic.",
+  "Calling: make_call places an outbound call. Give it a topic and the built-in AI holds the " +
+    "conversation on its own, with no webhook needed (the simplest way to place an automated call); " +
+    "omit topic for a webhook-driven call your backend controls. The connector prepends an AI " +
+    "disclosure to the greeting of calls it places; the one exception is wait_for_speaker, which " +
+    "connects silently (the agent must then identify as an AI when it speaks; with a topic the " +
+    "connector still enforces this via the system prompt). Use get_call for the transcript. Calls " +
+    "placed directly through the AgentPhone API or SDKs bypass this connector's disclosure logic.",
   "",
   "Billing and irreversible actions: buy_number, calls, and messages are billed per use. " +
     "delete_agent and manage_contact with action=delete cannot be undone (delete needs confirm=true). " +
@@ -181,7 +181,6 @@ const TOOL_META: Record<string, ToolMeta> = {
   get_call: { title: "Get Call", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   end_call: { title: "End Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   make_call: { title: "Make Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-  make_conversation_call: { title: "Make AI Conversation Call", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   list_agents: { title: "List Agents", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   create_agent: { title: "Create Agent", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   update_agent: { title: "Update Agent", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
