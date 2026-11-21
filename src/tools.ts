@@ -1343,7 +1343,7 @@ export function registerTools(
         return confirmationPreview(
           `This will place an outbound call to ${to_number}` +
             `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}. ` +
-            (wait_for_speaker
+            (wait_for_speaker || initial_greeting === ""
               ? "The call waits silently for the person to speak first."
               : initial_greeting ? `The call opens with: "${initial_greeting}"` : "Your webhook drives what the agent says.")
         );
@@ -1422,7 +1422,7 @@ export function registerTools(
           `This will place an autonomous AI phone call to ${to_number}` +
             `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}, ` +
             `where the assistant will hold a conversation about: "${topic}".` +
-            (wait_for_speaker ? " The call waits silently for the person to speak first." : "")
+            (wait_for_speaker || initial_greeting === "" ? " The call waits silently for the person to speak first." : "")
         );
       }
 
