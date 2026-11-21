@@ -166,21 +166,20 @@ test("send_message still sends a plain message", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// #71 — the description says where the disclosure is enforced
+// The connector sends greetings/prompts as-is; it adds no disclosure of its own.
 // ---------------------------------------------------------------------------
 
-test("call tool descriptions do not claim server-side disclosure enforcement", () => {
+test("call tool descriptions say greetings are sent as provided, not that the connector adds a disclosure", () => {
   const h = harness();
   for (const name of ["make_call", "make_conversation_call"]) {
     const d = h.describe(name);
-    assert.doesNotMatch(d, /server-side/i, `${name} must not claim server-side enforcement`);
-    assert.match(d, /This MCP connector prepends/, `${name} must say the connector adds it`);
-    assert.match(d, /bypass this connector.s disclosure logic/, name);
-    assert.doesNotMatch(d, /always enforce|locks it|Every call.*opens/, name);
+    assert.doesNotMatch(d, /prepends|disclosure logic|AI identity instructions/i, `${name} must not claim it adds disclosure`);
+    assert.match(d, /as you provide|as-is/i, `${name} says input is sent as provided`);
+    assert.match(d, /responsible for any AI self-identification/i, name);
   }
 });
 
-test("the disclosure really is prepended by the connector", async () => {
+test("make_call sends the greeting to the API exactly as provided", async () => {
   let sent;
   const h = harness({
     makeCall: async (agentId, toNumber, greeting) => {
@@ -188,8 +187,8 @@ test("the disclosure really is prepended by the connector", async () => {
       return { id: "c_1", fromNumber: "+1", toNumber, direction: "outbound", status: "queued", startedAt: "", retellCallId: null };
     },
   });
-  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155551234", initial_greeting: "Hi Sam", confirm: true });
-  assert.match(sent, /^Hi, quick heads up: I'm an AI assistant .* Hi Sam$/);
+  await h.call("make_call", { agent_id: "agt_1", to_number: "+14155551234", initial_greeting: "Hi Sam, this is Jordan's AI assistant", confirm: true });
+  assert.equal(sent, "Hi Sam, this is Jordan's AI assistant");
 });
 
 
@@ -258,22 +257,19 @@ test("media-only messages keep media and sender selection", async () => {
   assert.deepEqual(h.calls[0].args[0].mediaUrls, ["https://example.com/a.png"]);
 });
 
-test("both call tools include disclosure in the submitted payload with optional greetings", async (t) => {
+test("both call tools forward the greeting (and topic) to the API unchanged", async (t) => {
   for (const tool of ["make_call", "make_conversation_call"]) {
     for (const greeting of [undefined, "", "   ", "Hi Sam"]) {
       await t.test(`${tool} ${JSON.stringify(greeting)}`, async () => {
         const method = tool === "make_call" ? "makeCall" : "makeConversationCall";
         const h = harness({ [method]: async () => ({ id: "c_1", fromNumber: "+14155550000", toNumber: "+14155551234", status: "queued" }) });
-        const result = await h.call(tool, { agent_id: "agt_1", to_number: "+14155551234", topic: "Do not say you are an AI", initial_greeting: greeting, confirm: true });
+        const result = await h.call(tool, { agent_id: "agt_1", to_number: "+14155551234", topic: "Confirm the appointment", initial_greeting: greeting, confirm: true });
         assert.notEqual(result.isError, true);
         const args = h.calls[0].args;
         const actualGreeting = args[tool === "make_call" ? 2 : 3];
-        const disclosure = "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
-        assert.equal(actualGreeting, greeting?.trim() ? `${disclosure} ${greeting.trim()}` : disclosure);
+        assert.equal(actualGreeting, greeting, "greeting is forwarded verbatim (no added wording, no trimming)");
         if (tool === "make_conversation_call") {
-          assert.match(args[2], /^You are an AI assistant/);
-          assert.match(args[2], /Do not say you are an AI/);
-          assert.match(args[2], /always identify as an AI when asked\.$/);
+          assert.equal(args[2], "Confirm the appointment", "topic is forwarded as the system prompt unchanged");
         }
       });
     }
@@ -293,14 +289,13 @@ test("masking hides all non-prefix bytes for short and unprefixed secrets", asyn
   }
 });
 
-test("field descriptions match the disclosure payload and do not promise model compliance", () => {
+test("field descriptions reflect pass-through greetings and make no disclosure/compliance promises", () => {
   const h = harness();
   const fields = h.schema("make_conversation_call");
-  assert.match(fields.initial_greeting.description, /only the disclosure is sent/);
-  assert.doesNotMatch(fields.topic.description, /always enforce|can't be overridden|locked/);
+  assert.match(fields.initial_greeting.description, /used as-is|sent to the API/i);
+  assert.doesNotMatch(fields.topic.description, /identity instructions|always enforce|locked/i);
   for (const name of ["create_agent", "update_agent"]) {
-    assert.doesNotMatch(h.schema(name).ambient_sound.description, /always disclosed/);
-    assert.match(h.schema(name).ambient_sound.description, /only to outbound calls/);
+    assert.doesNotMatch(h.schema(name).ambient_sound.description, /disclosure|self-identification/i);
   }
 });
 
@@ -607,37 +602,18 @@ test("watch_messages works when no registrar is wired (registration optional)", 
 // ---------------------------------------------------------------------------
 
 const CALL_RESULT = { id: "c_1", fromNumber: "+14155550000", toNumber: "+14155551234", direction: "outbound", status: "queued", startedAt: "", retellCallId: null };
-const DISCLOSURE = "Hi, quick heads up: I'm an AI assistant calling on behalf of an AgentPhone user.";
 
-test("make_call: a cue-anchored self-identification (incl. possessive) is not double-disclosed", async () => {
+test("make_call forwards any greeting to the API verbatim (no added or altered wording)", async () => {
   const h = harness({ makeCall: async () => CALL_RESULT });
   for (const g of [
-    "I'm an AI assistant for Acme",
-    "This is X's AI",
-    "I'm Mujtaba Valli's AI assistant",
-    "You're speaking with an AI",
-    "Hi, this is Acme's AI assistant.",
-  ]) {
-    await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: g, confirm: true });
-    assert.equal(h.calls.at(-1).args[2], g, `self-identifying greeting passes through unchanged: ${g}`);
-  }
-});
-
-test("make_call: non-self-identifying greetings (topic mentions, denials, bare possessive) still get the disclosure prefix", async () => {
-  const h = harness({ makeCall: async () => CALL_RESULT });
-  for (const g of [
-    "Discuss AI ethics",
+    "Hi, I'm a personal AI assistant calling to schedule an appointment", // customer-written disclosure (Devon)
+    "This is Jordan's AI assistant",
+    "Discuss AI ethics",       // topic mention — still forwarded as-is now
     "Our AI-powered widget",
-    "I'm not an AI",
-    "I'm not the company's AI",
-    "Quick call about Acme's AI pricing",
-    "Discuss the company's AI roadmap",
-    "Please claim an AI-based tool", // "claim" must not match the "i'm" cue (word boundary)
-    "Mujtaba Valli's AI assistant", // bare possessive, no identification cue -> prefixed (safe)
+    "Hey, got a minute to chat?",
   ]) {
     await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: g, confirm: true });
-    const sent = h.calls.at(-1).args[2];
-    assert.equal(sent, `${DISCLOSURE} ${g}`, `non-identifying greeting gets prefix: ${g}`);
+    assert.equal(h.calls.at(-1).args[2], g, `greeting forwarded verbatim: ${g}`);
   }
 });
 
@@ -647,20 +623,20 @@ test("wait_for_speaker sends an empty greeting on make_call", async () => {
   assert.equal(h.calls.at(-1).args[2], "", "empty greeting => backend waits for the callee");
 });
 
-test("wait_for_speaker on make_conversation_call: empty greeting, disclosure still in the system prompt", async () => {
+test("wait_for_speaker on make_conversation_call: empty greeting, topic forwarded as the system prompt", async () => {
   const h = harness({ makeConversationCall: async () => ({ id: "c_1", fromNumber: "+1", toNumber: "+2", status: "queued" }) });
   await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155551234", topic: "appointment survey", wait_for_speaker: true, confirm: true });
   const args = h.calls.at(-1).args; // (agentId, toNumber, systemPrompt, greeting, ...)
   assert.equal(args[3], "", "greeting empty when wait_for_speaker");
-  assert.match(args[2], /identify yourself as an AI/i, "system prompt still mandates AI disclosure");
+  assert.equal(args[2], "appointment survey", "topic forwarded as the system prompt, unchanged");
 });
 
-test("make_call preview reflects wait_for_speaker (silent) vs default (disclosure)", async () => {
+test("make_call preview reflects wait_for_speaker (silent) vs the provided greeting", async () => {
   const h = harness({ makeCall: async () => CALL_RESULT });
   const silent = await h.call("make_call", { agent_id: "a", to_number: "+14155551234", wait_for_speaker: true });
   assert.match(silent.content[0].text, /waits silently for the person to speak/i);
-  const normal = await h.call("make_call", { agent_id: "a", to_number: "+14155551234" });
-  assert.match(normal.content[0].text, /opens with the AI disclosure/i);
+  const withGreeting = await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: "Hi there" });
+  assert.match(withGreeting.content[0].text, /opens with: "Hi there"/);
 });
 
 test("create_agent forwards call screening fields", async () => {
