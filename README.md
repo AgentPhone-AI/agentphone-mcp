@@ -159,10 +159,10 @@ The optional anonymous mode instead uses the configured server API key.
 - **Agents** — create agents with custom voices, system prompts, call transfer, and voicemail
 - **Usage & billing** — monitor number usage, message/call/webhook volume, and daily/monthly breakdowns
 
-## Authorization & AI disclosure
+## Authorization & safety
 
 - **Every outbound call and message is individually authorized by the user.** `make_call`, `make_conversation_call`, and `send_message` do nothing unless `confirm=true` is passed — without it they return a preview of the **full** destination(s) and content (all group recipients, the complete message body, every media URL, and any interactive payload) for the user to approve first (the same two-step pattern `buy_number` uses). There is no bulk-send path that skips a person in the loop.
-- **The connector adds AI self-identification to what it submits.** Outbound calls placed through the call tools open with an AI disclosure that no argument disables. When a **hosted** agent is created or updated through this connector, the connector also prepends the disclosure to its system prompt, opening line, and voicemail so they identify as AI on inbound calls and voicemail. This is disclosure text and prompt instruction that the connector submits — it guides, but does not itself guarantee, model behavior or backend playback, and it only covers agents created/updated through this connector (the AgentPhone backend is the authoritative enforcer for all inbound calls). Webhook agents (your own backend, which may be human-staffed) are left untouched.
+- **Greetings and prompts are sent as provided.** The connector passes your greeting, topic, system prompt, opening line, and voicemail to the API as you write them, without adding wording of its own. You are responsible for any AI self-identification your use case or jurisdiction requires — put it in the greeting or the agent's instructions (e.g. a greeting that opens with "Hi, I'm Jordan's AI assistant calling to confirm your appointment").
 - **No audio is exposed.** Voice synthesis happens only inside live calls; no tool returns audio files or call recordings. (`list_voices` includes a static voice-sample `preview_audio_url`, which is a library clip, not call audio.)
 
 ## All Tools (32)
