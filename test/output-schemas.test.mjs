@@ -648,9 +648,10 @@ test("create_agent and update_agent forward prompt/greeting/voicemail unchanged 
   // create: hosted and webhook alike pass the fields through verbatim.
   let created;
   let h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));
-  await h.call("create_agent", { name: "A", voice_mode: "hosted", system_prompt: "Be helpful.", begin_message: "Hi, I'm Jordan's AI assistant.", voicemail_message: "Call me back." });
+  // A plain, non-disclosing greeting proves nothing is injected: it comes back verbatim.
+  await h.call("create_agent", { name: "A", voice_mode: "hosted", system_prompt: "Be helpful.", begin_message: "Hello!", voicemail_message: "Call me back." });
   assert.equal(created.systemPrompt, "Be helpful.");
-  assert.equal(created.beginMessage, "Hi, I'm Jordan's AI assistant.");
+  assert.equal(created.beginMessage, "Hello!");
   assert.equal(created.voicemailMessage, "Call me back.");
 
   h = harness(makeStub({ createAgent: async (p) => { created = p; return agent; } }));

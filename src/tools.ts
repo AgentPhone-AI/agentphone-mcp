@@ -1386,7 +1386,7 @@ export function registerTools(
       to_number: z
         .string()
         .describe("The phone number to call, written in full international form with a country code, like +14155551234."),
-      topic: z.string().describe(
+      topic: z.string().min(1).describe(
         "The conversation goal for the assistant to pursue, sent to the API as the call objective. " +
           "Be specific about what to discuss and any goals."
       ),

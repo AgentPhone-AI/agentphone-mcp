@@ -639,6 +639,12 @@ test("make_call preview reflects wait_for_speaker (silent) vs the provided greet
   assert.match(withGreeting.content[0].text, /opens with: "Hi there"/);
 });
 
+test("make_conversation_call rejects an empty topic before placing a call", async () => {
+  const h = harness({ makeConversationCall: async () => ({ id: "c", fromNumber: "+1", toNumber: "+2", status: "queued" }) });
+  await assert.rejects(() => h.call("make_conversation_call", { agent_id: "a", to_number: "+14155551234", topic: "", confirm: true }));
+  assert.deepEqual(h.calls, [], "no call placed with an empty objective");
+});
+
 test("an empty greeting previews as silent (matches the backend wait-for-speaker), for both call tools", async () => {
   const mc = harness({ makeCall: async () => CALL_RESULT });
   const mcall = await mc.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: "" });
