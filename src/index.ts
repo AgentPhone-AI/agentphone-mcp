@@ -83,7 +83,7 @@ const instructionsFor = (watchMessages: boolean): string => [
     "IDs and number IDs it returns are the values the other tools expect.",
   "",
   "Sub-accounts: an account can have sub-accounts, each with its own agents and numbers. " +
-    "list_sub_accounts lists them. To work in one, pass its ID as sub_account_id to any tool " +
+    "list_sub_accounts lists them. To work in one, pass its ID as sub_account_id to any other tool " +
     "(start with account_overview); without it, tools act on the main account.",
   "",
   "Setup: create_agent makes an agent (the entity that owns numbers and handles calls and texts). " +

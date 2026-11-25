@@ -263,7 +263,7 @@ function subAccountField() {
   };
 }
 
-function withSubAccountOption(server: ToolRegistrar): ToolRegistrar {
+export function withSubAccountOption(server: ToolRegistrar): ToolRegistrar {
   return {
     tool(
       name: string,
@@ -506,7 +506,7 @@ export function registerTools(
         const structured = { ...result, hasMore };
         const footer = hasMore
           ? `\n\nShowing ${offset + 1}-${offset + result.data.length} of ${result.total}. Call list_sub_accounts again with offset=${offset + result.data.length} for the next page.`
-          : result.data.length === 0
+          : result.total === 0
             ? "\n\nThis account has no sub-accounts."
             : "";
         return ok(`${JSON.stringify(structured, null, 2)}${footer}`, structured);
