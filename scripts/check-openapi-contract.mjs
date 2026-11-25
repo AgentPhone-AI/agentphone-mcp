@@ -152,6 +152,14 @@ require$(paths["/v1/calls/{call_id}/end"]?.post, "missing POST /v1/calls/{call_i
   }
 }
 
+// --- Sub-accounts (list_sub_accounts; use_sub_account sends X-Sub-Account-Id) ---
+{
+  // The endpoint returns a plain dict ({ data: [...], total }) with no declared
+  // response model, so the spec carries no item schema to assert on — only pin
+  // that the GET endpoint the client reads still exists.
+  require$(paths["/v1/sub-accounts"]?.get, "missing GET /v1/sub-accounts (list_sub_accounts)");
+}
+
 // --- Detach endpoint exists (detach_number tolerates an empty 200/204 body) ---
 {
   const del = paths["/v1/agents/{agent_id}/numbers/{number_id}"]?.delete;

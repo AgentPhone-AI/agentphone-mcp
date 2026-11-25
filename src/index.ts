@@ -107,6 +107,12 @@ const instructionsFor = (watchMessages: boolean): string => [
   "",
   "Use IDs returned by account_overview, create_agent, buy_number, or the relevant list_* tools " +
     "before calling anything that takes an agent_id, number_id, conversation_id, or call_id.",
+  "",
+  "Sub-accounts: if your account has sub-accounts (isolated tenants, each with its own numbers and " +
+    "agents), list_sub_accounts shows them and use_sub_account scopes this session to one — every " +
+    "later tool then acts within that sub-account instead of the main account. Call use_sub_account " +
+    "with no id to return to the main account. If account_overview or list_numbers shows the main " +
+    "account when you expected a sub-account's numbers, select it with use_sub_account first.",
 ].join("\n");
 
 // Hosted platforms (Manufact, etc.) set PORT. Local MCP clients launch the bare
@@ -202,6 +208,11 @@ const TOOL_META: Record<string, ToolMeta> = {
   delete_webhook: { title: "Delete Webhook", readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   test_webhook: { title: "Test Webhook", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   list_webhook_deliveries: { title: "List Webhook Deliveries", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  list_sub_accounts: { title: "List Sub-Accounts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  // Changes only this session's routing (which account later tools act on). It
+  // reads no data and sends nothing outward, and is fully reversible, so it is
+  // not read-only but neither destructive nor open-world.
+  use_sub_account: { title: "Use Sub-Account", readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 };
 
 // One authoritative annotation set per tool, identical on HTTP and stdio: the
@@ -240,7 +251,10 @@ async function startStdio(): Promise<void> {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
 
-  const api = new AgentPhoneAPI(BASE_URL, apiKey);
+  // One process serves one local client, so a single variable holds the
+  // sub-account selection for the whole stdio session.
+  let stdioSubAccount: string | undefined;
+  const api = new AgentPhoneAPI(BASE_URL, apiKey, () => stdioSubAccount);
   const server = new McpServer(
     { name: NAME, title: TITLE, version: VERSION, description: DESCRIPTION, websiteUrl: WEBSITE_URL, icons: ICONS },
     // Cap the total number of elements across a tool call's input arrays/objects.
@@ -282,7 +296,12 @@ async function startStdio(): Promise<void> {
   };
   // No Wakeshift over stdio: its wakes come from the AgentPhone backend, which
   // can't reach a process on the user's machine.
-  registerTools(stdioRegistrar, api);
+  registerTools(stdioRegistrar, api, {
+    subAccounts: {
+      get: () => stdioSubAccount,
+      set: (id) => { stdioSubAccount = id || undefined; },
+    },
+  });
   await server.connect(new StdioServerTransport());
 }
 
@@ -344,8 +363,48 @@ async function startHttp(): Promise<void> {
 
   // Only the tool-call boundary chooses credentials. The shared API client
   // must not independently fall back to the server's account.
-  const tokenStore = new AsyncLocalStorage<string>();
-  const api = new AgentPhoneAPI(BASE_URL, () => tokenStore.getStore() || "");
+  const tokenStore = new AsyncLocalStorage<{ token: string; subAccountId?: string }>();
+  const api = new AgentPhoneAPI(
+    BASE_URL,
+    () => tokenStore.getStore()?.token || "",
+    () => tokenStore.getStore()?.subAccountId
+  );
+
+  // Per-caller sub-account selection, keyed by the bearer/OAuth token so each
+  // session keeps its own (the connector is multi-tenant). The token is the only
+  // stable per-session handle available at the tool boundary; a selection lives
+  // until it is changed, replaced by a newer token's, or evicted below. Bounded
+  // in size and age so it can't grow without limit.
+  const SUB_SELECTION_TTL_MS = 24 * 60 * 60 * 1000;
+  const SUB_SELECTION_MAX = 10_000;
+  const subAccountByToken = new Map<string, { id: string; at: number }>();
+  const pruneSubSelections = () => {
+    const now = Date.now();
+    for (const [k, v] of subAccountByToken) {
+      if (now - v.at > SUB_SELECTION_TTL_MS) subAccountByToken.delete(k);
+    }
+    // Map preserves insertion order; drop the oldest entries if still over cap.
+    while (subAccountByToken.size > SUB_SELECTION_MAX) {
+      const oldest = subAccountByToken.keys().next().value;
+      if (oldest === undefined) break;
+      subAccountByToken.delete(oldest);
+    }
+  };
+  const subAccounts = {
+    get: () => tokenStore.getStore()?.subAccountId,
+    set: (id: string | null | undefined) => {
+      const store = tokenStore.getStore();
+      if (!store) return;
+      if (id) {
+        store.subAccountId = id;
+        subAccountByToken.set(store.token, { id, at: Date.now() });
+      } else {
+        store.subAccountId = undefined;
+        subAccountByToken.delete(store.token);
+      }
+      pruneSubSelections();
+    },
+  };
 
   const clientId = process.env.MCP_OAUTH_CLIENT_ID;
   // Secret is optional: when the gateway client is registered as a PUBLIC client
@@ -659,13 +718,14 @@ async function startHttp(): Promise<void> {
               isError: true,
             } as any;
           }
-          return tokenStore.run(token, () => handler(params as any)) as any;
+          const subAccountId = subAccountByToken.get(token)?.id;
+          return tokenStore.run({ token, subAccountId }, () => handler(params as any)) as any;
         }
       );
     },
   };
 
-  registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
+  registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar, subAccounts });
 
   if (wakeshiftOn) {
     // mcp-use builds an MCP SDK McpServer for each session (and each stateless

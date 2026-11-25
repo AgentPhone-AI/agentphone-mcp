@@ -50,10 +50,22 @@ export class AgentPhoneAPI {
   // A static key, or a getter resolved per request (used when the credential
   // comes from the per-request OAuth token rather than a fixed env var).
   private apiKey: string | (() => string);
+  // Optional per-request sub-account selection. When it resolves to an id, every
+  // request carries `X-Sub-Account-Id`, so the backend scopes the call to that
+  // sub-account (its numbers, agents, messages) instead of the parent. The
+  // backend validates the sub-account belongs to the authenticated parent and
+  // 403s otherwise; a parent credential is still required. Resolved per request
+  // so one shared client can serve many sessions, each with its own selection.
+  private subAccountId?: () => string | null | undefined;
 
-  constructor(baseUrl: string, apiKey: string | (() => string)) {
+  constructor(
+    baseUrl: string,
+    apiKey: string | (() => string),
+    subAccountId?: () => string | null | undefined
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
+    this.subAccountId = subAccountId;
   }
 
   private async request<T>(
@@ -68,6 +80,8 @@ export class AgentPhoneAPI {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
+    const sub = this.subAccountId?.();
+    if (sub) headers["X-Sub-Account-Id"] = sub;
 
     const timeout = timeoutMs ?? 30_000;
     const controller = new AbortController();
@@ -161,6 +175,23 @@ export class AgentPhoneAPI {
       issue: { code?: string; message?: string; since?: string } | null;
       sub_account_id: string | null;
     }>("GET", "/v1/register/status");
+  }
+
+  // --- Sub-accounts ---
+
+  // The sub-accounts under the authenticated parent. Each row's `id` is what
+  // use_sub_account / X-Sub-Account-Id expect. Lists the whole family even when
+  // a sub-account is currently selected, so a session can switch between them.
+  async listSubAccounts() {
+    return this.request<{
+      data: Array<{
+        id: string;
+        name: string;
+        parentAccountId: string | null;
+        createdAt: string;
+      }>;
+      total: number;
+    }>("GET", "/v1/sub-accounts");
   }
 
   async buyNumber(country = "US", agentId?: string, areaCode?: string) {
