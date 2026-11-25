@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { registerTools } from "../dist/tools.js";
+import { registerTools, withSubAccountOption } from "../dist/tools.js";
 import { AgentPhoneAPI } from "../dist/api.js";
 
 // Drive the real handlers against the real API client with fetch stubbed, so
@@ -20,7 +20,7 @@ async function withFetch(respond, fn) {
   }
 }
 
-function harness() {
+function harness(api = new AgentPhoneAPI("https://api.example.test", "key")) {
   const tools = new Map();
   registerTools(
     {
@@ -29,7 +29,7 @@ function harness() {
         tools.set(name, { schema, handler });
       },
     },
-    new AgentPhoneAPI("https://api.example.test", "key")
+    api
   );
   return {
     names: () => [...tools.keys()],
@@ -69,15 +69,28 @@ test("without sub_account_id no X-Sub-Account-Id header is sent", async () => {
 });
 
 test("sub_account_id is not forwarded to the handler as a tool argument", async () => {
-  await withFetch(() => agentsPage, async (requests) => {
-    await harness().call("list_agents", { limit: 5, sub_account_id: "sub_1" });
-    assert.equal(requests[0].url, "https://api.example.test/v1/agents?limit=5&offset=0");
+  let received;
+  let registered;
+  const wrapped = withSubAccountOption({ tool: (...args) => { registered = args.at(-1); } });
+  wrapped.tool("probe", "d", { limit: z.number() }, {}, async (args) => {
+    received = args;
+    return { content: [] };
   });
+  await registered({ limit: 5, sub_account_id: "sub_1" });
+  assert.deepEqual(received, { limit: 5 });
 });
 
 test("concurrent calls keep their own sub-account scope", async () => {
   await withFetch(() => agentsPage, async (requests) => {
-    const h = harness();
+    // Delay before the request is built, so every call has started (and set
+    // its scope) before any of them reads it. Shared state would fail here.
+    class SlowAPI extends AgentPhoneAPI {
+      async listAgents(...args) {
+        await new Promise((r) => setTimeout(r, 10));
+        return super.listAgents(...args);
+      }
+    }
+    const h = harness(new SlowAPI("https://api.example.test", "key"));
     await Promise.all([
       h.call("list_agents", { sub_account_id: "sub_a" }),
       h.call("list_agents", {}),
@@ -97,6 +110,13 @@ test("list_sub_accounts lists sub-accounts with paging info", async () => {
     assert.equal(r.structuredContent.hasMore, true);
     assert.equal(r.structuredContent.data[0].name, "Saul");
     assert.match(r.content[0].text, /offset=1/);
+  });
+});
+
+test("an empty page past the end does not claim there are no sub-accounts", async () => {
+  await withFetch(() => ({ data: [], total: 3 }), async () => {
+    const r = await harness().call("list_sub_accounts", { offset: 10 });
+    assert.doesNotMatch(r.content[0].text, /no sub-accounts/);
   });
 });
 

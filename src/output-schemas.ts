@@ -399,8 +399,8 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
             .object({
               id: z.string().describe("The sub-account's ID (pass as sub_account_id to other tools)."),
               name: z.string().describe("The sub-account's name."),
-              parentAccountId: z.string().optional().describe("ID of the account this sub-account belongs to."),
-              createdAt: z.string().optional().describe("When the sub-account was created (ISO 8601)."),
+              parentAccountId: z.string().describe("ID of the account this sub-account belongs to."),
+              createdAt: z.string().describe("When the sub-account was created (ISO 8601)."),
             })
             .passthrough()
         )
