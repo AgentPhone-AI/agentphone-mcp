@@ -529,4 +529,41 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     .object({ data: z.array(deliveryEntry).describe("Recent delivery attempts."), ...listMeta })
     .passthrough()
     .describe("A page of webhook delivery history."),
+
+  list_sub_accounts: z
+    .object({
+      data: z
+        .array(
+          z
+            .object({
+              id: z.string().optional().describe("The sub-account's id (use as sub_account_id in use_sub_account)."),
+              name: z.string().optional().describe("The sub-account's display name."),
+              parentAccountId: z.string().nullable().optional().describe("The parent account's id."),
+              createdAt: z.string().optional().describe("When the sub-account was created (ISO 8601)."),
+            })
+            .passthrough()
+            .describe("A sub-account under this account.")
+        )
+        .describe("The sub-accounts under this account."),
+      total: z.number().optional().describe("Total number of sub-accounts."),
+      currentSubAccountId: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("The sub-account currently selected for this session, or null when acting on the main account."),
+    })
+    .passthrough()
+    .describe("The sub-accounts under this account, and which one is currently selected."),
+
+  use_sub_account: z
+    .object({
+      subAccountId: z
+        .string()
+        .nullable()
+        .describe("The sub-account now in effect for this session, or null when acting on the main account."),
+      name: z.string().optional().describe("The selected sub-account's name (omitted when cleared)."),
+      scope: z.enum(["sub-account", "parent"]).describe("Whether the session now scopes to a sub-account or the main account."),
+    })
+    .passthrough()
+    .describe("The session's sub-account selection after the change."),
 };

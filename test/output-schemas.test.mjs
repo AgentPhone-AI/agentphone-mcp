@@ -72,6 +72,7 @@ function makeStub(overrides = {}) {
     getUsage: async () => usage,
     getDailyUsage: async () => ({ data: [{ date: "2026-01-01", messages: 1, calls: 2, webhooks: 3 }], days: 30 }),
     getMonthlyUsage: async () => ({ data: [{ month: "2026-01", messages: 1, calls: 2, webhooks: 3 }], months: 12 }),
+    listSubAccounts: async () => ({ data: [{ id: "sub_1", name: "Saul", parentAccountId: "acct_1", createdAt: "t" }], total: 1 }),
     ...overrides,
   };
 }
@@ -130,6 +131,8 @@ const ARGS = {
   delete_webhook: {},
   test_webhook: {},
   list_webhook_deliveries: {},
+  list_sub_accounts: {},
+  use_sub_account: { sub_account_id: "sub_1" },
 };
 
 test("input schemas enforce canonical bounds and enums (#197)", () => {
@@ -676,7 +679,7 @@ test("create_agent and update_agent forward prompt/greeting/voicemail unchanged 
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 32);
+  assert.equal(registered.size, 34);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });

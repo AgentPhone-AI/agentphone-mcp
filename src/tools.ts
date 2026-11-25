@@ -40,6 +40,19 @@ export interface ToolRegistrar {
 }
 
 /**
+ * Per-session sub-account selection. `get` returns the id currently in effect
+ * for this caller (undefined = the parent account); `set` changes it. The
+ * transport wires this to session-scoped state: a per-token map on HTTP (each
+ * OAuth caller keeps its own selection), a single variable on stdio. The shared
+ * API client reads the same selection to attach X-Sub-Account-Id, so selecting
+ * here redirects every subsequent tool call to that sub-account.
+ */
+export interface SubAccountSelector {
+  get(): string | null | undefined;
+  set(id: string | null | undefined): void;
+}
+
+/**
  * Webhook signing secrets only exist to verify signatures on the receiving
  * server. Tool output lands in model context, chat transcripts and client logs,
  * so a signing secret is never returned through a tool: it is always masked to
@@ -249,8 +262,15 @@ function buildCallControls(args: {
 export function registerTools(
   server: ToolRegistrar,
   api: AgentPhoneAPI,
-  opts: { watchMessages?: boolean; registerWatch?: WatchRegistrar } = {}
+  opts: { watchMessages?: boolean; registerWatch?: WatchRegistrar; subAccounts?: SubAccountSelector } = {}
 ): void {
+  // When the transport does not supply a session-scoped selector (e.g. unit
+  // tests), fall back to a process-local one so the sub-account tools still
+  // function. Real transports pass their own, keeping selections isolated.
+  const subAccounts: SubAccountSelector = opts.subAccounts ?? (() => {
+    let current: string | null | undefined;
+    return { get: () => current, set: (id) => { current = id || undefined; } };
+  })();
   // ============================================================
   // Account Overview
   // ============================================================
@@ -2411,6 +2431,90 @@ export function registerTools(
         return ok(
           `${result.data.length} delivery(ies):\n\n${formatted}${total}`,
           result
+        );
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  // ============================================================
+  // Sub-accounts
+  // ============================================================
+
+  server.tool(
+    "list_sub_accounts",
+    "List the sub-accounts under your account. Each sub-account is an isolated tenant with its own " +
+      "numbers, agents, messages, and calls. Use the `id` here with use_sub_account to act within one. " +
+      "Shows which sub-account (if any) is currently selected for this session.",
+    {},
+    { readOnlyHint: true, idempotentHint: true },
+    async () => {
+      try {
+        const result = await api.listSubAccounts();
+        const current = subAccounts.get() || null;
+        const structured = { ...result, currentSubAccountId: current };
+        if (result.data.length === 0) {
+          return ok(
+            "No sub-accounts. All tools act on your main account." +
+              (current ? ` (A sub-account id is selected but no longer exists; call use_sub_account with no id to clear it.)` : ""),
+            structured
+          );
+        }
+        const formatted = result.data
+          .map((s) => `${s.id === current ? "→ " : "  "}${s.name} — id=${s.id}`)
+          .join("\n");
+        const scope = current
+          ? `\n\nActive scope: sub-account ${current}. Tools act within it. Call use_sub_account with no id to return to the main account.`
+          : `\n\nActive scope: main account. Call use_sub_account with a sub-account id to act within one.`;
+        return ok(`${result.data.length} sub-account(s):\n\n${formatted}${scope}`, structured);
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  server.tool(
+    "use_sub_account",
+    "Scope this session to one of your sub-accounts, so every later tool call (list_numbers, " +
+      "account_overview, send_message, make_call, etc.) acts within that sub-account — its own " +
+      "numbers, agents, conversations, and calls — instead of the main account. The selection " +
+      "persists for the rest of this session. Call with no `sub_account_id` (or an empty one) to " +
+      "return to the main account. Use list_sub_accounts to see the available ids.",
+    {
+      sub_account_id: z
+        .string()
+        .optional()
+        .describe(
+          "The sub-account id to act within (from list_sub_accounts). Omit or pass empty to return to the main (parent) account."
+        ),
+    },
+    { readOnlyHint: false, idempotentHint: true },
+    async ({ sub_account_id }) => {
+      const requested = (sub_account_id ?? "").trim();
+      // Clear → back to the parent account.
+      if (!requested) {
+        subAccounts.set(undefined);
+        return ok("Now acting on the main account. Tools no longer scope to a sub-account.", {
+          subAccountId: null,
+          scope: "parent",
+        });
+      }
+      try {
+        // Validate against the real family so a typo fails here with a helpful
+        // list, rather than every later call 403/404-ing with the id attached.
+        const { data } = await api.listSubAccounts();
+        const match = data.find((s) => s.id === requested);
+        if (!match) {
+          const known = data.length
+            ? ` Known sub-accounts: ${data.map((s) => `${s.name} (${s.id})`).join(", ")}.`
+            : " This account has no sub-accounts.";
+          return err(new Error(`No sub-account with id "${requested}" under this account.${known}`));
+        }
+        subAccounts.set(match.id);
+        return ok(
+          `Now acting within sub-account "${match.name}" (${match.id}). Every tool call scopes to it until you call use_sub_account with no id.`,
+          { subAccountId: match.id, name: match.name, scope: "sub-account" }
         );
       } catch (e) {
         return err(e);

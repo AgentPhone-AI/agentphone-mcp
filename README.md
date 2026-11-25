@@ -165,7 +165,7 @@ The optional anonymous mode instead uses the configured server API key.
 - **Greetings and prompts are sent as provided.** The connector passes your greeting, topic, system prompt, opening line, and voicemail to the API as you write them, without adding wording of its own. You are responsible for any AI self-identification your use case or jurisdiction requires — put it in the greeting or the agent's instructions (e.g. a greeting that opens with "Hi, I'm Jordan's AI assistant calling to confirm your appointment").
 - **No audio is exposed.** Voice synthesis happens only inside live calls; no tool returns audio files or call recordings. (`list_voices` includes a static voice-sample `preview_audio_url`, which is a library clip, not call audio.)
 
-## All Tools (32)
+## All Tools (34)
 
 ### Account
 
@@ -239,6 +239,21 @@ All webhook tools accept an optional `agent_id` — pass it to manage an agent-s
 `get_webhook` and `set_webhook` never return the signing secret, for either scope —
 it is always masked, so it can't land in model context, transcripts, or client logs.
 Retrieve the secret from the AgentPhone dashboard to verify webhook signatures.
+
+### Sub-Accounts
+
+If your account has sub-accounts — isolated tenants, each with their own numbers, agents,
+conversations, and calls — these two tools scope a session to one of them. The parent
+credential (OAuth token or API key) stays the same; the connector just tells the backend
+which sub-account to act within.
+
+| Tool | Description |
+|------|-------------|
+| `list_sub_accounts` | List the sub-accounts under your account, and show which one (if any) is currently selected for this session |
+| `use_sub_account` | Scope this session to a sub-account by `sub_account_id` — every later tool call (`account_overview`, `list_numbers`, `send_message`, `make_call`, …) then acts within it. Call with no id to return to the main account. The selection persists for the rest of the session |
+
+Each session keeps its own selection, so one hosted connector serves many callers without
+leaking one tenant's numbers into another's view.
 
 ## Environment Variables
 
