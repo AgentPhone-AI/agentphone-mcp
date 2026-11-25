@@ -428,10 +428,10 @@ function watchHarness(apiStub, opts = { watchMessages: true }) {
     describe: (name) => tools.get(name).description,
     annotations: (name) => tools.get(name).annotations,
     // Runs the handler inside a stand-in Wakeshift call; returns its result and subscriptions.
-    call: async (name, args) => {
+    call: async (name, args, callOpts = {}) => {
       const t = tools.get(name);
       const parsed = await z.object(t.schema).parseAsync(args);
-      const call = createToolCall({ tool: name });
+      const call = createToolCall({ tool: name, ...callOpts });
       const result = await withCall(wake, call, () => t.handler(parsed));
       return { result, subscriptions: call.subscriptions.map((s) => s.args.number) };
     },
@@ -487,6 +487,24 @@ test("watch_messages needs at least one number", async () => {
 test("watch_messages says to use it to wait for a reply instead of polling", () => {
   const description = watchHarness({}).describe("watch_messages");
   assert.match(description, /Use it to wait for a reply instead of calling get_messages repeatedly\./);
+});
+
+// The voucher line for a native client is appended by the SDK after the
+// handler returns, and is dropped (without failing the call) when minting it
+// exceeds the result-addition budget. The handler can't see that, so its
+// success text must tell a native client how to recover from a missing line.
+test("watch_messages tells a native client how to recover a missing authorization line", async () => {
+  const h = watchHarness({ getNumber });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a"] }, { native: true });
+  assert.equal(result.isError, undefined);
+  assert.match(result.content[0].text, /If no such line follows, the authorization could not be issued: call watch_messages again, or poll with get_messages\./);
+});
+
+test("watch_messages keeps the plain confirmation for a client Wakeshift wakes itself", async () => {
+  const h = watchHarness({ getNumber });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a"] });
+  assert.equal(result.isError, undefined);
+  assert.doesNotMatch(result.content[0].text, /authorization line/);
 });
 
 // ---------------------------------------------------------------------------

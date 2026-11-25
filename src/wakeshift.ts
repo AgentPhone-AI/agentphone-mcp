@@ -17,7 +17,12 @@ import { createHash } from "node:crypto";
 import { Wakeshift, encodeArgValue } from "@wakeshift/sdk";
 import { z } from "zod";
 
-export const wake = new Wakeshift();
+// blockMs: the voucher line for a native client (ChatGPT) is minted inside the
+// result addition, and past this budget the SDK sends the result WITHOUT the
+// line while the tool still reports success — the client then has nothing to
+// subscribe with. The 0.12.0 default of 1s drops it on an ordinarily slow
+// Wakeshift response; 5s matches the SDK's subscribe budget.
+export const wake = new Wakeshift({ callTimeouts: { blockMs: 5_000 } });
 
 type NumberArgs = { number: string };
 

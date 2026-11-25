@@ -1017,11 +1017,13 @@ export function registerTools(
           // Confirms the caller can see every number before subscribing to any.
           const numbers = await Promise.all(ids.map((id) => api.getNumber(id)));
           // One call, so every subscription belongs to the same conversation.
+          let nativeClient = false;
           for (const id of ids) {
             const sub = await watchNumber(id);
             if (sub.state === "unavailable") {
               return err(new Error(`This client can't be notified of new messages (${sub.reason}). Use get_messages to check for new messages.`));
             }
+            if (sub.state === "native") nativeClient = true;
             // Best-effort: register (or renew) the watch with the backend so it
             // keeps emitting message.received for this number. Detached, not
             // awaited: a slow or down backend (each call up to the registrar's
@@ -1041,9 +1043,19 @@ export function registerTools(
             }
           }
           const watching = ids.map((id, i) => ({ number_id: id, phone_number: numbers[i].phoneNumber }));
+          // A native client (state "native") completes the subscription itself
+          // from an authorization line Wakeshift appends AFTER this handler
+          // returns — and drops without failing the call when minting it times
+          // out. The handler can't see that outcome, so the recovery hint is
+          // unconditional for native clients.
+          const nativeHint = nativeClient
+            ? "\n\nYour client completes this subscription itself using the authorization line included with this result. " +
+              "If no such line follows, the authorization could not be issued: call watch_messages again, or poll with get_messages."
+            : "";
           return ok(
             `Watching ${watching.length} number(s) for inbound messages:\n` +
-              watching.map((w) => `  ${w.phone_number} (id=${w.number_id})`).join("\n"),
+              watching.map((w) => `  ${w.phone_number} (id=${w.number_id})`).join("\n") +
+              nativeHint,
             { watching }
           );
         } catch (e) {
