@@ -428,10 +428,10 @@ function watchHarness(apiStub, opts = { watchMessages: true }) {
     describe: (name) => tools.get(name).description,
     annotations: (name) => tools.get(name).annotations,
     // Runs the handler inside a stand-in Wakeshift call; returns its result and subscriptions.
-    call: async (name, args) => {
+    call: async (name, args, callOpts = {}) => {
       const t = tools.get(name);
       const parsed = await z.object(t.schema).parseAsync(args);
-      const call = createToolCall({ tool: name });
+      const call = createToolCall({ tool: name, ...callOpts });
       const result = await withCall(wake, call, () => t.handler(parsed));
       return { result, subscriptions: call.subscriptions.map((s) => s.args.number) };
     },
@@ -487,6 +487,26 @@ test("watch_messages needs at least one number", async () => {
 test("watch_messages says to use it to wait for a reply instead of polling", () => {
   const description = watchHarness({}).describe("watch_messages");
   assert.match(description, /Use it to wait for a reply instead of calling get_messages repeatedly\./);
+});
+
+// Wakeshift's confirmation is appended after the handler returns, and when
+// producing it times out the SDK still ships the success text — a native
+// client's voucher line dropped, a woken client's subscriptions rolled back.
+// The handler can't see either, so every success must carry the recovery hint.
+const RECOVERY_HINT = /If no such note follows, the watch did NOT take effect: call watch_messages again, or poll with get_messages\./;
+
+test("watch_messages tells a woken client how to recover a missing confirmation", async () => {
+  const h = watchHarness({ getNumber });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a"] });
+  assert.equal(result.isError, undefined);
+  assert.match(result.content[0].text, RECOVERY_HINT);
+});
+
+test("watch_messages tells a native client how to recover a missing confirmation", async () => {
+  const h = watchHarness({ getNumber });
+  const { result } = await h.call("watch_messages", { number_ids: ["num_a"] }, { native: true });
+  assert.equal(result.isError, undefined);
+  assert.match(result.content[0].text, RECOVERY_HINT);
 });
 
 // ---------------------------------------------------------------------------

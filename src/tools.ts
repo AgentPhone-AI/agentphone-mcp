@@ -1041,9 +1041,18 @@ export function registerTools(
             }
           }
           const watching = ids.map((id, i) => ({ number_id: id, phone_number: numbers[i].phoneNumber }));
+          // Wakeshift appends its confirmation (how the conversation is woken,
+          // or the authorization line a native client subscribes with) AFTER
+          // this handler returns. When producing it times out, the SDK still
+          // ships this success text, with native clients' line dropped and
+          // woken clients' subscriptions rolled back. The handler cannot see
+          // either outcome, so every success carries the recovery hint.
           return ok(
             `Watching ${watching.length} number(s) for inbound messages:\n` +
-              watching.map((w) => `  ${w.phone_number} (id=${w.number_id})`).join("\n"),
+              watching.map((w) => `  ${w.phone_number} (id=${w.number_id})`).join("\n") +
+              "\n\nWakeshift confirms each watch with a note after this message (how this conversation will be woken, " +
+              "or an authorization line your client subscribes with). If no such note follows, the watch did NOT take " +
+              "effect: call watch_messages again, or poll with get_messages.",
             { watching }
           );
         } catch (e) {
