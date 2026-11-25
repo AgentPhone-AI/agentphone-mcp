@@ -126,3 +126,36 @@ test("list_sub_accounts says so when there are none", async () => {
     assert.match(r.content[0].text, /no sub-accounts/);
   });
 });
+
+// A confirmation preview's retry instructions are built by a handler that
+// never saw sub_account_id; without re-attaching it, "the SAME arguments plus
+// confirm=true" would purchase on the PARENT account.
+test("a buy_number preview under a sub-account tells the agent to keep sub_account_id", async () => {
+  await withFetch(() => ({}), async (requests) => {
+    const r = await harness().call("buy_number", { sub_account_id: "sub_1" });
+    assert.equal(requests.length, 0, "a preview makes no API request");
+    assert.equal(r.structuredContent.confirmationRequired, true);
+    assert.equal(r.structuredContent.sub_account_id, "sub_1");
+    assert.match(r.content.at(-1).text, /sub_account_id="sub_1"/);
+  });
+});
+
+test("a confirmed buy_number that keeps sub_account_id purchases in the sub-account", async () => {
+  const bought = { id: "num_1", phoneNumber: "+14155550001", country: "US", status: "active" };
+  await withFetch(() => bought, async (requests) => {
+    const r = await harness().call("buy_number", { sub_account_id: "sub_1", confirm: true });
+    assert.notEqual(r.isError, true);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /\/v1\/numbers/);
+    assert.equal(requests[0].headers["X-Sub-Account-Id"], "sub_1");
+  });
+});
+
+test("a buy_number preview without a sub-account does not mention sub_account_id", async () => {
+  await withFetch(() => ({}), async () => {
+    const r = await harness().call("buy_number", {});
+    assert.equal(r.structuredContent.confirmationRequired, true);
+    assert.equal("sub_account_id" in r.structuredContent, false);
+    assert.doesNotMatch(r.content.at(-1).text, /sub_account_id/);
+  });
+});

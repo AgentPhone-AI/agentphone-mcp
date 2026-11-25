@@ -281,7 +281,22 @@ export function withSubAccountOption(server: ToolRegistrar): ToolRegistrar {
       }
       const scoped = async (args: any) => {
         const { sub_account_id, ...rest } = args ?? {};
-        return withSubAccount(sub_account_id, () => handler(rest));
+        const result = await withSubAccount(sub_account_id, () => handler(rest));
+        // Confirmation previews tell the agent to retry "with the SAME
+        // arguments plus confirm=true", but the handler never saw
+        // sub_account_id, so its suggested arguments omit it — and a retry
+        // without it acts on the PARENT account (for buy_number, a purchase on
+        // the wrong tenant). Re-attach the scope to the preview here.
+        const structured = result?.structuredContent as Record<string, unknown> | undefined;
+        if (sub_account_id && !result?.isError && structured?.confirmationRequired === true) {
+          const texts = result.content ?? [];
+          const last = texts[texts.length - 1];
+          if (last?.type === "text") {
+            last.text += `\n\nThis preview is scoped to sub-account ${sub_account_id}: the confirming call MUST include sub_account_id="${sub_account_id}" too, or it will act on the main account.`;
+          }
+          result.structuredContent = { ...structured, sub_account_id };
+        }
+        return result;
       };
       const scopedSchema = { ...schema, ...subAccountField() };
       if (hasAnnotations) server.tool(name, description, scopedSchema, annotationsOrHandler, scoped);
