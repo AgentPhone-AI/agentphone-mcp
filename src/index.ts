@@ -82,6 +82,10 @@ const instructionsFor = (watchMessages: boolean): string => [
   "Start with account_overview to see existing agents, numbers, webhook, and usage. The agent " +
     "IDs and number IDs it returns are the values the other tools expect.",
   "",
+  "Sub-accounts: an account can have sub-accounts, each with its own agents and numbers. " +
+    "list_sub_accounts lists them. To work in one, pass its ID as sub_account_id to any tool " +
+    "(start with account_overview); without it, tools act on the main account.",
+  "",
   "Setup: create_agent makes an agent (the entity that owns numbers and handles calls and texts). " +
     "buy_number provisions a number — a paid purchase that spends account balance and requires " +
     "confirm=true. attach_number links a number to an agent. list_voices gives the voice IDs you " +
@@ -170,6 +174,7 @@ if (httpMode) {
 type ToolMeta = { title: string; readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
 const TOOL_META: Record<string, ToolMeta> = {
   account_overview: { title: "Account Overview", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  list_sub_accounts: { title: "List Sub-accounts", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   list_numbers: { title: "List Phone Numbers", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   buy_number: { title: "Buy Phone Number", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   send_message: { title: "Send Message", readOnlyHint: false, destructiveHint: true, openWorldHint: true },

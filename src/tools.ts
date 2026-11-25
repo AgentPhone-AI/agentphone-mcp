@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { AgentPhoneAPI, ApiError } from "./api.js";
+import { AgentPhoneAPI, ApiError, withSubAccount } from "./api.js";
 import { watchNumber, WATCH_TTL, WATCH_TTL_SECONDS } from "./wakeshift.js";
 import type { WatchRegistrar } from "./backend-watches.js";
 
@@ -241,16 +241,67 @@ function buildCallControls(args: {
   };
 }
 
+// Every tool except list_sub_accounts accepts an optional sub_account_id. When
+// set, the call acts on that sub-account instead of the authenticated account:
+// each API request carries X-Sub-Account-Id, and the backend checks the caller
+// is the sub-account's parent (403 otherwise). Added here, in one place, so no
+// tool can be registered without it.
+const SUB_ACCOUNT_EXEMPT = new Set(["list_sub_accounts"]);
+
+function subAccountField() {
+  return {
+    sub_account_id: z
+      .string()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        "Act on this sub-account instead of the main account. Use an ID from list_sub_accounts. " +
+          "Omit to act on the main account. IDs returned while acting on a sub-account (agents, " +
+          "numbers, calls, conversations) belong to it, so pass the same sub_account_id when using them."
+      ),
+  };
+}
+
+function withSubAccountOption(server: ToolRegistrar): ToolRegistrar {
+  return {
+    tool(
+      name: string,
+      description: string,
+      schema: Record<string, z.ZodTypeAny>,
+      annotationsOrHandler: Record<string, unknown> | ((args: any) => Promise<ToolResult>),
+      maybeHandler?: (args: any) => Promise<ToolResult>
+    ): void {
+      const hasAnnotations = typeof annotationsOrHandler !== "function";
+      const handler = (hasAnnotations ? maybeHandler : annotationsOrHandler) as (args: any) => Promise<ToolResult>;
+      if (SUB_ACCOUNT_EXEMPT.has(name)) {
+        if (hasAnnotations) server.tool(name, description, schema, annotationsOrHandler, handler);
+        else server.tool(name, description, schema, handler);
+        return;
+      }
+      const scoped = async (args: any) => {
+        const { sub_account_id, ...rest } = args ?? {};
+        return withSubAccount(sub_account_id, () => handler(rest));
+      };
+      const scopedSchema = { ...schema, ...subAccountField() };
+      if (hasAnnotations) server.tool(name, description, scopedSchema, annotationsOrHandler, scoped);
+      else server.tool(name, description, scopedSchema, scoped);
+    },
+  } as ToolRegistrar;
+}
+
 /**
  * watchMessages: offer watch_messages, and have send_message's result point to
  * it. Only when Wakeshift is on and the AgentPhone backend pushes inbound
  * messages (HTTP transport); see index.ts.
  */
 export function registerTools(
-  server: ToolRegistrar,
+  registrar: ToolRegistrar,
   api: AgentPhoneAPI,
   opts: { watchMessages?: boolean; registerWatch?: WatchRegistrar } = {}
 ): void {
+  const server = withSubAccountOption(registrar);
+
   // ============================================================
   // Account Overview
   // ============================================================
@@ -421,6 +472,44 @@ export function registerTools(
               }
             : undefined,
         });
+      } catch (e) {
+        return err(e);
+      }
+    }
+  );
+
+  // ============================================================
+  // Sub-accounts
+  // ============================================================
+
+  server.tool(
+    "list_sub_accounts",
+    "List the sub-accounts under your account. A sub-account has its own agents, numbers, " +
+      "conversations, and calls, separate from the main account. To work in one, pass its ID as " +
+      "sub_account_id to any other tool (e.g. account_overview, list_numbers, send_message). " +
+      "Returns each sub-account's ID and name.",
+    {
+      limit: z
+        .number().int().min(1).max(100)
+        .default(50)
+        .describe("How many sub-accounts to return in one page."),
+      offset: z
+        .number().int().min(0)
+        .default(0)
+        .describe("How many sub-accounts to skip before this page, for paging through a long list."),
+    },
+    { readOnlyHint: true, idempotentHint: true },
+    async ({ limit, offset }) => {
+      try {
+        const result = await api.listSubAccounts(limit, offset);
+        const hasMore = offset + result.data.length < result.total;
+        const structured = { ...result, hasMore };
+        const footer = hasMore
+          ? `\n\nShowing ${offset + 1}-${offset + result.data.length} of ${result.total}. Call list_sub_accounts again with offset=${offset + result.data.length} for the next page.`
+          : result.data.length === 0
+            ? "\n\nThis account has no sub-accounts."
+            : "";
+        return ok(`${JSON.stringify(structured, null, 2)}${footer}`, structured);
       } catch (e) {
         return err(e);
       }

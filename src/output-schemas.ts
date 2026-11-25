@@ -391,6 +391,25 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
     })
     .describe("The call (with transcript turns when available), or a confirmation-required preview when confirm was not set."),
 
+  list_sub_accounts: z
+    .object({
+      data: z
+        .array(
+          z
+            .object({
+              id: z.string().describe("The sub-account's ID (pass as sub_account_id to other tools)."),
+              name: z.string().describe("The sub-account's name."),
+              parentAccountId: z.string().optional().describe("ID of the account this sub-account belongs to."),
+              createdAt: z.string().optional().describe("When the sub-account was created (ISO 8601)."),
+            })
+            .passthrough()
+        )
+        .describe("Sub-accounts on this page."),
+      ...listMeta,
+    })
+    .passthrough()
+    .describe("A page of sub-accounts."),
+
   list_agents: z
     .object({ data: z.array(agentObject).describe("Agents on this page."), ...listMeta })
     .passthrough()

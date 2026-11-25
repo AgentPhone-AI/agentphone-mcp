@@ -165,7 +165,7 @@ The optional anonymous mode instead uses the configured server API key.
 - **Greetings and prompts are sent as provided.** The connector passes your greeting, topic, system prompt, opening line, and voicemail to the API as you write them, without adding wording of its own. You are responsible for any AI self-identification your use case or jurisdiction requires — put it in the greeting or the agent's instructions (e.g. a greeting that opens with "Hi, I'm Jordan's AI assistant calling to confirm your appointment").
 - **No audio is exposed.** Voice synthesis happens only inside live calls; no tool returns audio files or call recordings. (`list_voices` includes a static voice-sample `preview_audio_url`, which is a library clip, not call audio.)
 
-## All Tools (32)
+## All Tools (33)
 
 ### Account
 
@@ -173,6 +173,11 @@ The optional anonymous mode instead uses the configured server API key.
 |------|-------------|
 | `account_overview` | Get a full snapshot of your account — agents, numbers, webhook, and usage |
 | `get_usage` | Get usage stats — number usage, billed SMS segments, and message/call/webhook volume. Use `breakdown` for daily or monthly time-series. |
+| `list_sub_accounts` | List your sub-accounts. Pass a sub-account's ID as `sub_account_id` to any other tool to act on it. |
+
+#### Sub-accounts
+
+Every tool except `list_sub_accounts` accepts an optional `sub_account_id`. With it, the tool acts on that sub-account (its agents, numbers, messages, and calls) instead of the account you signed in with. This works with OAuth and with API keys: the server sends the ID as the `X-Sub-Account-Id` header, and the API only allows it when your account is the sub-account's parent.
 
 ### Phone Numbers
 
