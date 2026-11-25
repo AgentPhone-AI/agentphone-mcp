@@ -71,6 +71,7 @@ function makeStub(overrides = {}) {
     listWebhookDeliveries: async () => ({ data: [delivery], hasMore: false, total: 1 }),
     getUsage: async () => usage,
     getDailyUsage: async () => ({ data: [{ date: "2026-01-01", messages: 1, calls: 2, webhooks: 3 }], days: 30 }),
+    listSubAccounts: async () => ({ data: [{ id: "sub_1", name: "Saul", parentAccountId: "acc_1", createdAt: "t" }], total: 1 }),
     getMonthlyUsage: async () => ({ data: [{ month: "2026-01", messages: 1, calls: 2, webhooks: 3 }], months: 12 }),
     ...overrides,
   };
@@ -99,6 +100,7 @@ function harness(apiStub) {
 // Valid arguments that take each tool down its API-calling success path.
 const ARGS = {
   account_overview: {},
+  list_sub_accounts: {},
   list_numbers: {},
   buy_number: { confirm: true },
   send_message: { agent_id: "agt_1", to_number: "+14155550123", body: "hi", confirm: true },
@@ -676,7 +678,7 @@ test("create_agent and update_agent forward prompt/greeting/voicemail unchanged 
 
 test("registered tools and OUTPUT_SCHEMAS are the same set (no drift)", () => {
   const registered = new Set(harness(makeStub()).names());
-  assert.equal(registered.size, 32);
+  assert.equal(registered.size, 33);
   for (const name of registered) assert.ok(OUTPUT_SCHEMAS[name], `tool ${name} has no output schema`);
   for (const name of Object.keys(OUTPUT_SCHEMAS)) assert.ok(registered.has(name), `output schema ${name} has no tool`);
 });
@@ -721,7 +723,7 @@ test("make_conversation_call returns immediately without any wait inputs (#192)"
 
 test("get_call takes only call_id, with no wait/timeout, and never long-polls (#192)", async () => {
   const schema = harness(makeStub()).schema("get_call");
-  assert.deepEqual(Object.keys(schema).sort(), ["call_id"]);
+  assert.deepEqual(Object.keys(schema).sort(), ["call_id", "sub_account_id"]);
   let argCount = -1;
   const h = harness(makeStub({ getCall: async (...args) => { argCount = args.length; return { ...call, id: args[0] }; } }));
   const r = await h.call("get_call", { call_id: "call_1" });

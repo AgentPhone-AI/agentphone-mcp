@@ -5,6 +5,19 @@
  * Used by the MCP server to proxy tool calls to the backend.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
+// The sub-account the current tool call acts on, if any. A parent account's
+// credential may act on one of its sub-accounts by sending X-Sub-Account-Id;
+// the backend checks the caller is that sub-account's parent (403 otherwise).
+// Bound per tool call (see registerTools) so concurrent calls never share it.
+const subAccountScope = new AsyncLocalStorage<string | undefined>();
+
+/** Run fn with every API request it makes scoped to subAccountId (when set). */
+export function withSubAccount<T>(subAccountId: string | undefined, fn: () => T): T {
+  return subAccountScope.run(subAccountId, fn);
+}
+
 type WebhookDelivery = {
   id: string;
   eventType: string | null;
@@ -68,6 +81,8 @@ export class AgentPhoneAPI {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
+    const subAccountId = subAccountScope.getStore();
+    if (subAccountId) headers["X-Sub-Account-Id"] = subAccountId;
 
     const timeout = timeoutMs ?? 30_000;
     const controller = new AbortController();
@@ -910,6 +925,20 @@ export class AgentPhoneAPI {
     if (hours !== undefined) path += `&hours=${hours}`;
     const page = await this.request<{ items: WebhookDelivery[]; total: number }>("GET", path);
     return { data: page.items, total: page.total };
+  }
+
+  // --- Sub-accounts ---
+
+  async listSubAccounts(limit = 100, offset = 0) {
+    return this.request<{
+      data: Array<{
+        id: string;
+        name: string;
+        parentAccountId: string;
+        createdAt: string;
+      }>;
+      total: number;
+    }>("GET", `/v1/sub-accounts?limit=${limit}&offset=${offset}`);
   }
 
   // --- Usage ---
