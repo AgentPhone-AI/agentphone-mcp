@@ -18,6 +18,26 @@ export function withSubAccount<T>(subAccountId: string | undefined, fn: () => T)
   return subAccountScope.run(subAccountId, fn);
 }
 
+/**
+ * Encode an ID as one URL path segment. encodeURIComponent leaves "." as is,
+ * and URL parsing resolves "." and ".." segments, so an ID of ".." would send
+ * the request to a different endpoint: attach_number's
+ * POST /v1/agents/../numbers becomes POST /v1/numbers (the number-purchase
+ * endpoint, skipping buy_number's confirm step), and detach_number's
+ * DELETE /v1/agents/A/numbers/.. becomes DELETE /v1/agents/A/. An empty ID
+ * likewise turns an item path into its collection. No real ID is any of these,
+ * so they are refused before any request is made.
+ */
+function pathSegment(id: string): string {
+  if (id === "" || id === "." || id === "..") {
+    throw new Error(
+      `Invalid ID ${JSON.stringify(id)}: an ID can't be empty, "." or "..". ` +
+        "Use an ID returned by account_overview or a list_* tool."
+    );
+  }
+  return encodeURIComponent(id);
+}
+
 type WebhookDelivery = {
   id: string;
   eventType: string | null;
@@ -164,7 +184,7 @@ export class AgentPhoneAPI {
       outboundSms: string; // "enabled" | "activating" | "registration_required"
       inboundCallsEnabled: boolean;
       whatsappEnabled: boolean;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}`);
+    }>("GET", `/v1/numbers/${pathSegment(numberId)}`);
   }
 
   // A2P / 10DLC campaign (compliance) status for the account/sub-account.
@@ -194,7 +214,7 @@ export class AgentPhoneAPI {
       success: boolean;
       phoneNumber: string;
       status: string;
-    }>("DELETE", `/v1/numbers/${encodeURIComponent(numberId)}`);
+    }>("DELETE", `/v1/numbers/${pathSegment(numberId)}`);
   }
 
   // --- SMS / Messages ---
@@ -222,7 +242,7 @@ export class AgentPhoneAPI {
       }>;
       hasMore: boolean;
       nextCursor?: string | null;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/messages?${query}`);
+    }>("GET", `/v1/numbers/${pathSegment(numberId)}/messages?${query}`);
     // Normalize the sender to `from` so the formatter and output schema have a
     // single, explicit field (the API returns `from_`; keep `from` as a fallback
     // for any older shape).
@@ -294,7 +314,7 @@ export class AgentPhoneAPI {
       reaction_type: string;
       message_id: string;
       channel: string;
-    }>("POST", `/v1/messages/${encodeURIComponent(messageId)}/reactions`, {
+    }>("POST", `/v1/messages/${pathSegment(messageId)}/reactions`, {
       reaction,
     });
   }
@@ -445,7 +465,7 @@ export class AgentPhoneAPI {
       language: string;
       createdAt: string;
       numbers?: Array<{ id: string; phoneNumber: string; status: string }> | null;
-    }>("PATCH", `/v1/agents/${encodeURIComponent(agentId)}`, params);
+    }>("PATCH", `/v1/agents/${pathSegment(agentId)}`, params);
   }
 
   async deleteAgent(agentId: string) {
@@ -453,7 +473,7 @@ export class AgentPhoneAPI {
       success: boolean;
       id: string;
       name: string;
-    }>("DELETE", `/v1/agents/${encodeURIComponent(agentId)}`);
+    }>("DELETE", `/v1/agents/${pathSegment(agentId)}`);
   }
 
   async getAgent(agentId: string) {
@@ -485,19 +505,19 @@ export class AgentPhoneAPI {
         phoneNumber: string;
         status: string;
       }> | null;
-    }>("GET", `/v1/agents/${encodeURIComponent(agentId)}`);
+    }>("GET", `/v1/agents/${pathSegment(agentId)}`);
   }
 
   async attachNumber(agentId: string, numberId: string) {
     return this.request<{
       agentId: string;
       number: { id: string; phoneNumber: string; status: string };
-    }>("POST", `/v1/agents/${encodeURIComponent(agentId)}/numbers`, { numberId });
+    }>("POST", `/v1/agents/${pathSegment(agentId)}/numbers`, { numberId });
   }
 
   async detachNumber(agentId: string, numberId: string) {
     return this.deleteExpectingSuccess(
-      `/v1/agents/${encodeURIComponent(agentId)}/numbers/${encodeURIComponent(numberId)}`
+      `/v1/agents/${pathSegment(agentId)}/numbers/${pathSegment(numberId)}`
     );
   }
 
@@ -520,7 +540,7 @@ export class AgentPhoneAPI {
       total: number;
     }>(
       "GET",
-      `/v1/agents/${encodeURIComponent(agentId)}/conversations?limit=${limit}&offset=${offset}`
+      `/v1/agents/${pathSegment(agentId)}/conversations?limit=${limit}&offset=${offset}`
     );
   }
 
@@ -541,7 +561,7 @@ export class AgentPhoneAPI {
       total: number;
     }>(
       "GET",
-      `/v1/agents/${encodeURIComponent(agentId)}/calls?limit=${limit}&offset=${offset}`
+      `/v1/agents/${pathSegment(agentId)}/calls?limit=${limit}&offset=${offset}`
     );
   }
 
@@ -555,7 +575,7 @@ export class AgentPhoneAPI {
       status: string;
       contextLimit: number;
       createdAt: string;
-    } | null>("GET", `/v1/agents/${encodeURIComponent(agentId)}/webhook`);
+    } | null>("GET", `/v1/agents/${pathSegment(agentId)}/webhook`);
   }
 
   async setAgentWebhook(
@@ -575,22 +595,22 @@ export class AgentPhoneAPI {
       status: string;
       contextLimit: number;
       createdAt: string;
-    }>("POST", `/v1/agents/${encodeURIComponent(agentId)}/webhook`, body);
+    }>("POST", `/v1/agents/${pathSegment(agentId)}/webhook`, body);
   }
 
   async deleteAgentWebhook(agentId: string) {
-    return this.deleteExpectingSuccess(`/v1/agents/${encodeURIComponent(agentId)}/webhook`);
+    return this.deleteExpectingSuccess(`/v1/agents/${pathSegment(agentId)}/webhook`);
   }
 
   async testAgentWebhook(agentId: string) {
     return this.request<WebhookTestResult>(
       "POST",
-      `/v1/agents/${encodeURIComponent(agentId)}/webhook/test`
+      `/v1/agents/${pathSegment(agentId)}/webhook/test`
     );
   }
 
   async listAgentWebhookDeliveries(agentId: string, limit = 20) {
-    const path = `/v1/agents/${encodeURIComponent(agentId)}/webhook/deliveries?limit=${limit}`;
+    const path = `/v1/agents/${pathSegment(agentId)}/webhook/deliveries?limit=${limit}`;
     const rows = await this.request<WebhookDelivery[]>("GET", path);
     return { data: rows };
   }
@@ -647,7 +667,7 @@ export class AgentPhoneAPI {
         response: string | null;
         createdAt: string;
       }>;
-    }>("GET", `/v1/calls/${encodeURIComponent(callId)}`);
+    }>("GET", `/v1/calls/${pathSegment(callId)}`);
   }
 
   async makeCall(
@@ -683,7 +703,7 @@ export class AgentPhoneAPI {
       status?: string;
       endedAt?: string | null;
       success?: boolean;
-    }>("POST", `/v1/calls/${encodeURIComponent(callId)}/end`);
+    }>("POST", `/v1/calls/${pathSegment(callId)}/end`);
   }
 
   // Initiates the call and returns immediately with its ID and initial state.
@@ -737,7 +757,7 @@ export class AgentPhoneAPI {
       }>;
       hasMore: boolean;
       total: number;
-    }>("GET", `/v1/numbers/${encodeURIComponent(numberId)}/calls?limit=${limit}&offset=${offset}`);
+    }>("GET", `/v1/numbers/${pathSegment(numberId)}/calls?limit=${limit}&offset=${offset}`);
   }
 
   // --- Conversations ---
@@ -781,7 +801,7 @@ export class AgentPhoneAPI {
       }>;
     }>(
       "GET",
-      `/v1/conversations/${encodeURIComponent(conversationId)}?message_limit=${messageLimit}`
+      `/v1/conversations/${pathSegment(conversationId)}?message_limit=${messageLimit}`
     );
   }
 
@@ -810,7 +830,7 @@ export class AgentPhoneAPI {
       nextCursor?: string | null;
     }>(
       "GET",
-      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?${query}`
+      `/v1/conversations/${pathSegment(conversationId)}/messages?${query}`
     );
   }
 
@@ -825,7 +845,7 @@ export class AgentPhoneAPI {
       messageCount: number;
       metadata: Record<string, unknown> | null;
       createdAt: string;
-    }>("PATCH", `/v1/conversations/${encodeURIComponent(conversationId)}`, { metadata });
+    }>("PATCH", `/v1/conversations/${pathSegment(conversationId)}`, { metadata });
   }
 
   // --- Contacts ---
@@ -877,11 +897,11 @@ export class AgentPhoneAPI {
       notes: string | null;
       createdAt: string;
       updatedAt: string;
-    }>("PATCH", `/v1/contacts/${encodeURIComponent(contactId)}`, params);
+    }>("PATCH", `/v1/contacts/${pathSegment(contactId)}`, params);
   }
 
   async deleteContact(contactId: string) {
-    return this.deleteExpectingSuccess(`/v1/contacts/${encodeURIComponent(contactId)}`);
+    return this.deleteExpectingSuccess(`/v1/contacts/${pathSegment(contactId)}`);
   }
 
   // --- Webhooks ---
