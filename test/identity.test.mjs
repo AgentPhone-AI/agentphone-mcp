@@ -23,10 +23,12 @@ test("credential resolver, OAuth: a handler ctx is validated auth only, fail clo
 });
 
 test("credential resolver, OAuth identify path: reads Hono's auth var (get), not a property", () => {
+  // The header carries a DIFFERENT token, so this passes only if the
+  // validated context var is what's read, not the header fallback.
   const resolve = makeCredentialResolver({
     oauth: true,
     requestContext: () => honoCtx({ auth: { accessToken: "oauth-token" } }),
-    authorizationHeader: () => "Bearer oauth-token",
+    authorizationHeader: () => "Bearer header-fallback-token",
   });
   assert.equal(resolve(), "oauth-token");
 });
