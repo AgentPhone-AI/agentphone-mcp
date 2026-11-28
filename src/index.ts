@@ -397,6 +397,24 @@ async function startHttp(): Promise<void> {
     );
   }
 
+  // The request's credential, resolved one way for every consumer so identity
+  // and tool calls can never disagree: tool handlers pass their ctx, identify
+  // has none and reads the request context. "" means none (fail closed).
+  const credentialFor = (ctx?: unknown): string => {
+    if (oauthEnabled) {
+      try {
+        const c: any = ctx ?? getRequestContext();
+        return c?.auth?.accessToken || "";
+      } catch {
+        return "";
+      }
+    }
+    const header = authorizationHeader();
+    if (header === null) return "";
+    const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
+    return bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
+  };
+
   // Wakeshift is on only with both AGENTPHONE_EVENTS_SECRET and WAKESHIFT_KEY
   // set. Decided here because the instructions mention watch_messages only when
   // it is offered; the route and the tool are set up further down.
@@ -647,11 +665,7 @@ async function startHttp(): Promise<void> {
           ...(outputSchemaFor(name) ? { outputSchema: outputSchemaFor(name) } : {}),
         },
         async (params: unknown, ctx: any) => {
-          const header = authorizationHeader();
-          const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
-          const token: string = oauthEnabled
-            ? ctx?.auth?.accessToken || ""
-            : bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
+          const token = credentialFor(ctx);
           if (!token) {
             // Fail closed. Never let an unauthenticated caller borrow the
             // server's credential by accident.
@@ -674,23 +688,6 @@ async function startHttp(): Promise<void> {
   registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
 
   if (wakeshiftOn) {
-    // The request's credential, resolved exactly as the tool-call boundary
-    // resolves it (OAuth: the validated access token; otherwise the Bearer
-    // header, or the opted-in anonymous fallback). "" means none.
-    const credentialFor = (): string => {
-      if (oauthEnabled) {
-        try {
-          const c: any = getRequestContext();
-          return c?.auth?.accessToken || "";
-        } catch {
-          return "";
-        }
-      }
-      const header = authorizationHeader();
-      if (header === null) return "";
-      const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
-      return bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
-    };
     // Who is calling, by AgentPhone account: binds subscribe vouchers (and
     // native subscriptions) to the account instead of the Mcp-Session-Id, so
     // ChatGPT can redeem a voucher from a later session (see identity.ts).
@@ -702,6 +699,11 @@ async function startHttp(): Promise<void> {
         const { account_id } = await withSubAccount(undefined, () =>
           tokenStore.run(credential, () => api.me())
         );
+        // A 200 without a usable id (a proxy error page, a regression) must
+        // not be cached as a successful identity: take the transient path.
+        if (typeof account_id !== "string" || !account_id) {
+          throw new Error("GET /v1/me returned no account_id");
+        }
         return account_id;
       },
     });

@@ -68,28 +68,53 @@ test("expires after the TTL and resolves again", async () => {
   assert.equal(state.calls.length, 2);
 });
 
-test("a rejected credential (401) is anonymous, and only for the short TTL", async () => {
-  let valid = false;
-  const { identify, state } = rig({
-    credential: () => "sk_live_rotated",
-    lookup: async () => {
-      if (!valid) {
-        const err = new Error("unauthorized");
-        err.status = 401;
-        throw err;
-      }
-      return "acct-1";
-    },
+for (const status of [401, 403]) {
+  test(`a rejected credential (${status}) is anonymous, and only for the short TTL`, async () => {
+    let valid = false;
+    const { identify, state } = rig({
+      credential: () => "sk_live_rotated",
+      lookup: async () => {
+        if (!valid) {
+          const err = new Error("rejected");
+          err.status = status;
+          throw err;
+        }
+        return "acct-1";
+      },
+    });
+    assert.equal(await identify(), undefined); // rejected resolves, never throws
+    assert.equal(await identify(), undefined); // cached: no hammering
+    assert.equal(state.calls.length, 1);
+    // One stray rejection against a just-rotated token must not strand it:
+    // once the backend accepts the same bytes, the short TTL lets them resolve.
+    valid = true;
+    state.now += IDENTITY_FAIL_TTL_MS + 1;
+    assert.deepEqual(await identify(), { user: "acct-1" });
+    assert.equal(state.calls.length, 2);
   });
-  assert.equal(await identify(), undefined); // rejected resolves, never throws
-  assert.equal(await identify(), undefined); // cached: no hammering
-  assert.equal(state.calls.length, 1);
-  // One stray 401 against a just-rotated token must not strand it: once the
-  // backend accepts the same bytes, the short TTL lets them resolve.
-  valid = true;
-  state.now += IDENTITY_FAIL_TTL_MS + 1;
-  assert.deepEqual(await identify(), { user: "acct-1" });
-  assert.equal(state.calls.length, 2);
+}
+
+test("the cache is bounded: past the cap, the oldest credential is evicted", async () => {
+  let current = "";
+  const { identify, state } = rig({
+    credential: () => current,
+    lookup: async (c) => "acct-of-" + c,
+  });
+  // Fill past the 10,000-entry cap with distinct live credentials.
+  for (let i = 0; i <= 10_000; i++) {
+    current = "cred-" + i;
+    await identify();
+  }
+  assert.equal(state.calls.length, 10_001);
+  // cred-0 was evicted to stay within the cap, so it is looked up again even
+  // though its TTL has not passed.
+  current = "cred-0";
+  assert.deepEqual(await identify(), { user: "acct-of-cred-0" });
+  assert.equal(state.calls.length, 10_002);
+  // A later entry is still cached.
+  current = "cred-9000";
+  await identify();
+  assert.equal(state.calls.length, 10_002);
 });
 
 test("a 404 (backend without /v1/me yet) is anonymous, so this server can deploy first", async () => {

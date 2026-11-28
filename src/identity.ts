@@ -17,8 +17,10 @@
  *
  * Outcomes map onto the SDK's two identify signals, which behave differently:
  *
- * - No credential, or one the backend REJECTS (401/403): resolve undefined.
- *   To Wakeshift that caller is anonymous — the pre-identify behavior.
+ * - No credential, one the backend REJECTS (401/403), or a backend that does
+ *   not serve /v1/me at all (404): resolve undefined. To Wakeshift that
+ *   caller is anonymous, the pre-identify behavior, so either side can
+ *   deploy or roll back first without subscribes starting to fail.
  * - The lookup FAILS (timeout, 5xx, network): throw. The SDK then refuses
  *   Wakeshift's part of that one request: a tool's subscribe fails visibly
  *   (watch_messages reports the error; its backend lookups were failing too),
@@ -80,8 +82,15 @@ export function makeIdentify(opts: MakeIdentifyOptions): () => Promise<{ user: s
   const inflight = new Map<string, Promise<{ user: string } | undefined>>();
 
   const sweep = (at: number) => {
-    if (cache.size <= MAX_ENTRIES) return;
+    if (cache.size < MAX_ENTRIES) return;
     for (const [k, v] of cache) if (v.expires <= at) cache.delete(k);
+    // Still at the cap (that many live credentials, or a flood of junk
+    // bearers): evict oldest-inserted entries so the map is truly bounded.
+    while (cache.size >= MAX_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
   };
 
   return async () => {
@@ -115,8 +124,12 @@ export function makeIdentify(opts: MakeIdentifyOptions): () => Promise<{ user: s
         return { user };
       } catch (err) {
         const status = (err as { status?: unknown })?.status;
-        // 404: the backend doesn't serve /v1/me yet. Anonymous (the
-        // pre-identify behavior), so this server can deploy first.
+        // 404: the backend doesn't serve /v1/me (deploy order, a rollback,
+        // or a misrouted base URL). Anonymous keeps every subscribe working
+        // as it did pre-identify; the log keeps a misroute from being silent.
+        if (status === 404) {
+          console.error("identity: GET /v1/me returned 404; callers stay anonymous until the backend serves it.");
+        }
         const rejected = status === 401 || status === 403 || status === 404;
         sweep(at);
         cache.set(
