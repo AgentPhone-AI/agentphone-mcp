@@ -84,16 +84,7 @@ function err(error: unknown): ToolResult {
         hint = " The supplied credential was rejected. Check the bearer token (HTTP) or AGENTPHONE_API_KEY (stdio).";
         break;
       case 404:
-        if (error.path.includes("/agents/"))
-          hint = " Use list_agents to see valid agent IDs.";
-        else if (error.path.includes("/numbers/"))
-          hint = " Use list_numbers to see valid number IDs.";
-        else if (error.path.includes("/calls/"))
-          hint = " Use list_calls to see recent call IDs.";
-        else if (error.path.includes("/conversations/"))
-          hint = " Use list_conversations to see valid conversation IDs.";
-        else if (error.path.includes("/webhook"))
-          hint = " Use get_webhook to check whether a webhook is configured.";
+        hint = notFoundHint(error.path);
         break;
       case 429:
         hint = error.retryAfter
@@ -105,6 +96,38 @@ function err(error: unknown): ToolResult {
   }
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+// Where to look up a valid ID after a 404, chosen from the most specific
+// resource in the path. A path like /v1/agents/A/numbers/N names two IDs, and
+// the one most likely missing is the last: matching "/agents/" first used to
+// send a bad number_id, or an agent with no webhook of its own, to list_agents.
+// Routes that sit under an ID-taking collection but carry no ID themselves; a
+// 404 there isn't a bad ID, so no lookup hint applies.
+const FIXED_ROUTES = new Set(["/v1/agents/voices", "/v1/contacts/capabilities"]);
+
+function notFoundHint(path: string): string {
+  const p = path.split("?")[0];
+  if (FIXED_ROUTES.has(p)) return "";
+  if (/^\/v1\/agents\/[^/]+\/webhook(\/|$)/.test(p))
+    return " Use get_webhook with this agent_id to check whether the agent has its own webhook, and list_agents to confirm the agent ID.";
+  if (/^\/v1\/webhooks(\/|$)/.test(p))
+    return " Use get_webhook to check whether a webhook is configured.";
+  if (/^\/v1\/agents\/[^/]+\/numbers\/[^/]+$/.test(p))
+    return " Use get_agent to see which numbers are attached to this agent, and list_numbers for valid number IDs.";
+  // attach_number sends the number ID in the body, so either ID may be the bad one.
+  if (/^\/v1\/agents\/[^/]+\/numbers$/.test(p))
+    return " Use list_agents to confirm the agent ID, and list_numbers for valid number IDs.";
+  if (p.startsWith("/v1/messages/"))
+    return " Use get_messages or get_conversation_messages to find a valid message ID.";
+  if (p.startsWith("/v1/contacts/"))
+    return " Use list_contacts to see valid contact IDs.";
+  if (p.startsWith("/v1/agents/")) return " Use list_agents to see valid agent IDs.";
+  if (p.startsWith("/v1/numbers/")) return " Use list_numbers to see valid number IDs.";
+  if (p.startsWith("/v1/calls/")) return " Use list_calls to see recent call IDs.";
+  if (p.startsWith("/v1/conversations/"))
+    return " Use list_conversations to see valid conversation IDs.";
+  return "";
 }
 
 // --- Validation helpers ---
