@@ -92,6 +92,19 @@ test("a rejected credential (401) is anonymous, and only for the short TTL", asy
   assert.equal(state.calls.length, 2);
 });
 
+test("a 404 (backend without /v1/me yet) is anonymous, so this server can deploy first", async () => {
+  const { identify, state } = rig({
+    credential: () => "sk_live_a",
+    lookup: async () => {
+      const err = new Error("Not Found");
+      err.status = 404;
+      throw err;
+    },
+  });
+  assert.equal(await identify(), undefined);
+  assert.equal(state.calls.length, 1);
+});
+
 test("a transient failure rethrows (cached too), then recovers after the short TTL", async () => {
   let fail = true;
   const { identify, state } = rig({

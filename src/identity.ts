@@ -53,8 +53,9 @@ export type MakeIdentifyOptions = {
   credential: () => string;
   /**
    * Resolve a credential to its account id. A throw whose `status` is 401 or
-   * 403 means the backend rejected the credential (the caller is anonymous);
-   * any other throw is a transient failure and is rethrown to the SDK.
+   * 403 means the backend rejected the credential, and 404 means it doesn't
+   * serve /v1/me yet (deploy order): both leave the caller anonymous. Any
+   * other throw is a transient failure and is rethrown to the SDK.
    */
   lookup: IdentityLookup;
   /** Test hook: the clock. */
@@ -114,7 +115,9 @@ export function makeIdentify(opts: MakeIdentifyOptions): () => Promise<{ user: s
         return { user };
       } catch (err) {
         const status = (err as { status?: unknown })?.status;
-        const rejected = status === 401 || status === 403;
+        // 404: the backend doesn't serve /v1/me yet. Anonymous (the
+        // pre-identify behavior), so this server can deploy first.
+        const rejected = status === 401 || status === 403 || status === 404;
         sweep(at);
         cache.set(
           key,
