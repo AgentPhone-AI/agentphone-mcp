@@ -674,6 +674,59 @@ test("an empty greeting previews as silent (matches the backend wait-for-speaker
   assert.match(ccall.content[0].text, /waits silently for the person to speak/i);
 });
 
+// The user approves a call from its preview, so the preview must show what the
+// callee will hear or be told. make_conversation_call used to drop the greeting
+// (the first words spoken, sent as-is), and both tools dropped the per-call
+// controls: the identity and purpose given to call screening, the voice, the
+// variables, and whether the call is recorded.
+test("make_conversation_call preview shows the opening line that will be spoken", async () => {
+  const h = harness({ makeConversationCall: async () => CALL_RESULT });
+  const r = await h.call("make_conversation_call", {
+    agent_id: "a", to_number: "+14155551234", topic: "reschedule", initial_greeting: "Hi, it's Dana from Acme",
+  });
+  assert.equal(r.structuredContent.confirmationRequired, true);
+  assert.match(r.content[0].text, /opens with: "Hi, it's Dana from Acme"/);
+  const own = await h.call("make_conversation_call", { agent_id: "a", to_number: "+14155551234", topic: "reschedule" });
+  assert.match(own.content[0].text, /assistant opens the call on its own/);
+  // wait_for_speaker still wins over a greeting, matching what is sent.
+  const silent = await h.call("make_conversation_call", {
+    agent_id: "a", to_number: "+14155551234", topic: "reschedule", initial_greeting: "ignored", wait_for_speaker: true,
+  });
+  assert.match(silent.content[0].text, /waits silently/);
+  assert.doesNotMatch(silent.content[0].text, /ignored/);
+  assert.deepEqual(h.calls, [], "a preview places no call");
+});
+
+test("call previews show every per-call control that is set, for both call tools", async () => {
+  const controls = {
+    call_screening_identity: "Acme Dental",
+    call_screening_purpose: "appointment reminder",
+    voice: "v_nova",
+    variables: { customerName: "Sam" },
+    disable_recording: true,
+    model_tier: "max",
+  };
+  for (const [tool, extra] of [["make_call", {}], ["make_conversation_call", { topic: "reminder" }]]) {
+    const h = harness({});
+    const r = await h.call(tool, { agent_id: "agt_1", from_number_id: "num_1", to_number: "+14155551234", ...extra, ...controls });
+    const text = r.content[0].text;
+    assert.match(text, /using agent agt_1 from number num_1/, `${tool}: shows both the agent and the number`);
+    assert.match(text, /Identity given to call screening: "Acme Dental"/, tool);
+    assert.match(text, /Purpose given to call screening: "appointment reminder"/, tool);
+    assert.match(text, /Voice: v_nova/, tool);
+    assert.match(text, /Variables: \{"customerName":"Sam"\}/, tool);
+    assert.match(text, /Recording: off for this call/, tool);
+    assert.match(text, /Model tier: max/, tool);
+    assert.deepEqual(h.calls, [], `${tool}: a preview places no call`);
+  }
+});
+
+test("call previews add no control lines when no controls are set", async () => {
+  const h = harness({});
+  const r = await h.call("make_call", { agent_id: "a", to_number: "+14155551234", initial_greeting: "Hi" });
+  assert.doesNotMatch(r.content[0].text, /call screening|Voice:|Variables:|Recording:|Model tier:/);
+});
+
 test("create_agent forwards call screening fields", async () => {
   let got;
   const h = harness({ createAgent: async (p) => { got = p; return { id: "a", name: "n", voiceMode: "webhook", voice: "v", modelTier: "balanced" }; } });

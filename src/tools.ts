@@ -241,6 +241,47 @@ function buildCallControls(args: {
   };
 }
 
+// The lines a call preview adds for the per-call controls that are set. The user
+// approves the call from the preview, so anything that changes what the callee
+// hears or is told (the voice, the identity and purpose given to call
+// screening, the variables the agent speaks from) or whether the call is
+// recorded has to be in it. Unset controls add nothing.
+function callControlsPreview(args: {
+  voice?: string;
+  disable_recording?: boolean;
+  variables?: Record<string, string>;
+  model_tier?: string;
+  call_screening_identity?: string;
+  call_screening_purpose?: string;
+}): string {
+  const lines = [
+    args.call_screening_identity !== undefined
+      ? `Identity given to call screening: "${args.call_screening_identity}"`
+      : null,
+    args.call_screening_purpose !== undefined
+      ? `Purpose given to call screening: "${args.call_screening_purpose}"`
+      : null,
+    args.voice !== undefined ? `Voice: ${args.voice} (instead of the agent's default)` : null,
+    args.variables !== undefined && Object.keys(args.variables).length > 0
+      ? `Variables: ${JSON.stringify(args.variables)}`
+      : null,
+    args.disable_recording !== undefined
+      ? `Recording: ${args.disable_recording ? "off" : "on"} for this call`
+      : null,
+    args.model_tier !== undefined ? `Model tier: ${args.model_tier}` : null,
+  ].filter((l): l is string => l !== null);
+  return lines.length ? `\n  ${lines.join("\n  ")}` : "";
+}
+
+// "using agent A" / "from number N" / both, for a call preview.
+function callerPreview(agentId: string | undefined, fromNumberId: string | undefined): string {
+  const parts = [
+    agentId ? `using agent ${agentId}` : null,
+    fromNumberId ? `from number ${fromNumberId}` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.length ? ` ${parts.join(" ")}` : "";
+}
+
 // Every tool except list_sub_accounts accepts an optional sub_account_id. When
 // set, the call acts on that sub-account instead of the authenticated account:
 // each API request carries X-Sub-Account-Id, and the backend checks the caller
@@ -1454,11 +1495,11 @@ export function registerTools(
 
       if (!confirm) {
         return confirmationPreview(
-          `This will place an outbound call to ${to_number}` +
-            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}. ` +
+          `This will place an outbound call to ${to_number}${callerPreview(agent_id, from_number_id)}. ` +
             (wait_for_speaker || initial_greeting === ""
               ? "The call waits silently for the person to speak first."
-              : initial_greeting ? `The call opens with: "${initial_greeting}"` : "Your webhook drives what the agent says.")
+              : initial_greeting ? `The call opens with: "${initial_greeting}"` : "Your webhook drives what the agent says.") +
+            callControlsPreview({ voice, ...controls })
         );
       }
 
@@ -1532,10 +1573,14 @@ export function registerTools(
 
       if (!confirm) {
         return confirmationPreview(
-          `This will place an autonomous AI phone call to ${to_number}` +
-            `${from_number_id ? ` from number ${from_number_id}` : agent_id ? ` using agent ${agent_id}` : ""}, ` +
+          `This will place an autonomous AI phone call to ${to_number}${callerPreview(agent_id, from_number_id)}, ` +
             `where the assistant will hold a conversation about: "${topic}".` +
-            (wait_for_speaker || initial_greeting === "" ? " The call waits silently for the person to speak first." : "")
+            (wait_for_speaker || initial_greeting === ""
+              ? " The call waits silently for the person to speak first."
+              : initial_greeting
+                ? ` The call opens with: "${initial_greeting}"`
+                : " The assistant opens the call on its own.") +
+            callControlsPreview({ voice, ...controls })
         );
       }
 
