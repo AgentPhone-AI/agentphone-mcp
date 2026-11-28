@@ -21,7 +21,7 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { installConciseValidation } from "./validation.js";
 import { z } from "zod";
 import { AgentPhoneAPI, withSubAccount } from "./api.js";
-import { makeIdentify } from "./identity.js";
+import { makeCredentialResolver, makeIdentify } from "./identity.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 import {
@@ -398,22 +398,17 @@ async function startHttp(): Promise<void> {
   }
 
   // The request's credential, resolved one way for every consumer so identity
-  // and tool calls can never disagree: tool handlers pass their ctx, identify
-  // has none and reads the request context. "" means none (fail closed).
-  const credentialFor = (ctx?: unknown): string => {
-    if (oauthEnabled) {
-      try {
-        const c: any = ctx ?? getRequestContext();
-        return c?.auth?.accessToken || "";
-      } catch {
-        return "";
-      }
-    }
-    const header = authorizationHeader();
-    if (header === null) return "";
-    const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
-    return bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
-  };
+  // and tool calls can never disagree: tool handlers pass their ctx (validated
+  // auth only, fail closed), identify passes nothing and reads the request
+  // context, where Hono keeps auth behind get("auth"), not as a property
+  // (see makeCredentialResolver). "" means none.
+  const credentialFor = makeCredentialResolver({
+    oauth: oauthEnabled,
+    requestContext: getRequestContext,
+    authorizationHeader,
+    allowAnonymous,
+    serverApiKey,
+  });
 
   // Wakeshift is on only with both AGENTPHONE_EVENTS_SECRET and WAKESHIFT_KEY
   // set. Decided here because the instructions mention watch_messages only when

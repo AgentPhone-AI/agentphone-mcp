@@ -35,6 +35,67 @@
 
 import { createHash } from "node:crypto";
 
+/** What a credential resolver reads from (see makeCredentialResolver). */
+export type CredentialSources = {
+  /** OAuth mode: prefer the validated access token over the raw header. */
+  oauth: boolean;
+  /** The current request's context (mcp-use getRequestContext); may throw. */
+  requestContext: () => unknown;
+  /**
+   * The raw Authorization header: undefined when the request has none, null
+   * when no request context is reachable (fail closed, never the fallback key).
+   */
+  authorizationHeader: () => string | undefined | null;
+  /** Non-OAuth only: a headerless request may use the server's own key. */
+  allowAnonymous?: boolean;
+  serverApiKey?: string;
+};
+
+const bearerOf = (header: string | undefined): string => header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
+
+/**
+ * One resolver for every consumer, so identity and tool calls can never
+ * disagree about a request's credential. Two call shapes:
+ *
+ * - With a handler ctx (tool calls): OAuth mode returns only the validated
+ *   `ctx.auth.accessToken`, exactly the pre-existing fail-closed boundary.
+ * - Without (identify, invoked by the Wakeshift SDK outside any handler):
+ *   the request context is the raw Hono context, which keeps auth as a
+ *   context var behind `get("auth")`, NOT as an `.auth` property (the
+ *   handler ctx is a transformed copy that has both). Read both shapes,
+ *   then fall back to the raw Bearer header: in OAuth mode that header IS
+ *   the access token the client presented, and GET /v1/me is the validator,
+ *   so identity stays correct even if the context shape changes again.
+ *
+ * "" always means "no credential" and is never looked up.
+ */
+export function makeCredentialResolver(src: CredentialSources): (ctx?: unknown) => string {
+  return (ctx?: unknown): string => {
+    if (src.oauth) {
+      if (ctx !== undefined) {
+        try {
+          return (ctx as { auth?: { accessToken?: string } })?.auth?.accessToken || "";
+        } catch {
+          return "";
+        }
+      }
+      try {
+        const c: any = src.requestContext();
+        const auth = (typeof c?.get === "function" ? c.get("auth") : undefined) ?? c?.auth;
+        if (auth?.accessToken) return auth.accessToken;
+      } catch {
+        // No request context: the header read below answers null and fails closed.
+      }
+      const header = src.authorizationHeader();
+      return header == null ? "" : bearerOf(header);
+    }
+    const header = src.authorizationHeader();
+    if (header === null) return "";
+    const bearer = bearerOf(header);
+    return bearer || (src.allowAnonymous && header === undefined ? src.serverApiKey || "" : "");
+  };
+}
+
 /** How long one credential's resolved account is reused. */
 export const IDENTITY_TTL_MS = 10 * 60_000;
 

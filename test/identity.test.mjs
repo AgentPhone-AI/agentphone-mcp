@@ -1,6 +1,69 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { makeIdentify, IDENTITY_TTL_MS, IDENTITY_FAIL_TTL_MS } from "../dist/identity.js";
+import {
+  makeCredentialResolver,
+  makeIdentify,
+  IDENTITY_TTL_MS,
+  IDENTITY_FAIL_TTL_MS,
+} from "../dist/identity.js";
+
+// A Hono-style request context: auth lives behind get("auth"), never as a
+// property. This is what mcp-use's getRequestContext() actually returns.
+const honoCtx = (vars = {}) => ({ get: (k) => vars[k], req: {} });
+
+test("credential resolver, OAuth: a handler ctx is validated auth only, fail closed", () => {
+  const resolve = makeCredentialResolver({
+    oauth: true,
+    requestContext: () => honoCtx({ auth: { accessToken: "ctx-store-token" } }),
+    authorizationHeader: () => "Bearer raw-token",
+  });
+  assert.equal(resolve({ auth: { accessToken: "validated" } }), "validated");
+  // ctx passed but carries no validated auth: no fallback to header or store.
+  assert.equal(resolve({}), "");
+});
+
+test("credential resolver, OAuth identify path: reads Hono's auth var (get), not a property", () => {
+  const resolve = makeCredentialResolver({
+    oauth: true,
+    requestContext: () => honoCtx({ auth: { accessToken: "oauth-token" } }),
+    authorizationHeader: () => "Bearer oauth-token",
+  });
+  assert.equal(resolve(), "oauth-token");
+});
+
+test("credential resolver, OAuth identify path: falls back to the Bearer header", () => {
+  // Context reachable but without the auth var (shape drift), then no context at all.
+  const withBareCtx = makeCredentialResolver({
+    oauth: true,
+    requestContext: () => honoCtx(),
+    authorizationHeader: () => "Bearer header-token",
+  });
+  assert.equal(withBareCtx(), "header-token");
+  const throwingCtx = makeCredentialResolver({
+    oauth: true,
+    requestContext: () => {
+      throw new Error("no request");
+    },
+    authorizationHeader: () => null,
+  });
+  assert.equal(throwingCtx(), ""); // null header = no reachable request: fail closed
+});
+
+test("credential resolver, non-OAuth: bearer, malformed, anonymous fallback", () => {
+  const make = (header, allowAnonymous) =>
+    makeCredentialResolver({
+      oauth: false,
+      requestContext: () => honoCtx(),
+      authorizationHeader: () => header,
+      allowAnonymous,
+      serverApiKey: "sk_live_server",
+    });
+  assert.equal(make("Bearer sk_live_caller", false)(), "sk_live_caller");
+  assert.equal(make("Basic nope", true)(), ""); // malformed is never the fallback key
+  assert.equal(make(undefined, true)(), "sk_live_server"); // headerless + opted in
+  assert.equal(make(undefined, false)(), "");
+  assert.equal(make(null, true)(), ""); // no request context: fail closed
+});
 
 // A controllable clock and a lookup that records its calls.
 function rig({ credential, lookup }) {
