@@ -20,7 +20,8 @@ import { createRequire } from "node:module";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { installConciseValidation } from "./validation.js";
 import { z } from "zod";
-import { AgentPhoneAPI } from "./api.js";
+import { AgentPhoneAPI, withSubAccount } from "./api.js";
+import { makeCredentialResolver, makeIdentify } from "./identity.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 import {
@@ -396,6 +397,19 @@ async function startHttp(): Promise<void> {
     );
   }
 
+  // The request's credential, resolved one way for every consumer so identity
+  // and tool calls can never disagree: tool handlers pass their ctx (validated
+  // auth only, fail closed), identify passes nothing and reads the request
+  // context, where Hono keeps auth behind get("auth"), not as a property
+  // (see makeCredentialResolver). "" means none.
+  const credentialFor = makeCredentialResolver({
+    oauth: oauthEnabled,
+    requestContext: getRequestContext,
+    authorizationHeader,
+    allowAnonymous,
+    serverApiKey,
+  });
+
   // Wakeshift is on only with both AGENTPHONE_EVENTS_SECRET and WAKESHIFT_KEY
   // set. Decided here because the instructions mention watch_messages only when
   // it is offered; the route and the tool are set up further down.
@@ -646,11 +660,7 @@ async function startHttp(): Promise<void> {
           ...(outputSchemaFor(name) ? { outputSchema: outputSchemaFor(name) } : {}),
         },
         async (params: unknown, ctx: any) => {
-          const header = authorizationHeader();
-          const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
-          const token: string = oauthEnabled
-            ? ctx?.auth?.accessToken || ""
-            : bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
+          const token = credentialFor(ctx);
           if (!token) {
             // Fail closed. Never let an unauthenticated caller borrow the
             // server's credential by accident.
@@ -673,12 +683,31 @@ async function startHttp(): Promise<void> {
   registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
 
   if (wakeshiftOn) {
+    // Who is calling, by AgentPhone account: binds subscribe vouchers (and
+    // native subscriptions) to the account instead of the Mcp-Session-Id, so
+    // ChatGPT can redeem a voucher from a later session (see identity.ts).
+    // Resolved outside the sub-account scope: identity is the credential's
+    // own account whatever sub-account a call acts on.
+    const identify = makeIdentify({
+      credential: credentialFor,
+      lookup: async (credential) => {
+        const { account_id } = await withSubAccount(undefined, () =>
+          tokenStore.run(credential, () => api.me())
+        );
+        // A 200 without a usable id (a proxy error page, a regression) must
+        // not be cached as a successful identity: take the transient path.
+        if (typeof account_id !== "string" || !account_id) {
+          throw new Error("GET /v1/me returned no account_id");
+        }
+        return account_id;
+      },
+    });
     // mcp-use builds an MCP SDK McpServer for each session (and each stateless
     // request); attach to each one it hands out.
     const sessionServer = server.getServerForSession.bind(server);
     server.getServerForSession = (sessionId?: string) => {
       const mcp = sessionServer(sessionId);
-      wake.attach(mcp as any, { wrap: WAKESHIFT_WRAP });
+      wake.attach(mcp as any, { wrap: WAKESHIFT_WRAP, identify });
       return mcp;
     };
     // Protocol 2026-07-28 has no session. mcp-use answers a request without one
