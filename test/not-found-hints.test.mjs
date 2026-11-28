@@ -51,6 +51,11 @@ const CASES = [
   ["delete_webhook", {}, /get_webhook to check whether a webhook is configured/, /list_agents/],
   ["send_message", { reaction: "love", react_to_message_id: "msg_x", confirm: true }, /get_messages or get_conversation_messages/, null],
   ["manage_contact", { action: "update", contact_id: "ct_x", name: "Sam" }, /list_contacts/, null],
+  // attach_number sends number_id in the body, so the hint names both lookups.
+  ["attach_number", { agent_id: "agt_1", number_id: "num_x" }, /list_agents .*list_numbers/, null],
+  // Fixed routes under an ID collection carry no ID, so no lookup hint applies.
+  ["list_voices", {}, /^Not found$/, /list_agents/],
+  ["check_capabilities", { phone_number: "+14155551234" }, /^Not found$/, /list_contacts/],
   // Single-ID paths keep the hint they had.
   ["get_agent", { agent_id: "agt_x" }, /list_agents/, null],
   ["list_calls", { agent_id: "agt_x" }, /list_agents/, null],
