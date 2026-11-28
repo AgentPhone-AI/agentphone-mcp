@@ -275,11 +275,12 @@ function callControlsPreview(args: {
   return lines.length ? `\n  ${lines.join("\n  ")}` : "";
 }
 
-// "using agent A" / "from number N" / both, for a call preview.
+// "using agent A" / "from number N" / both, for a call preview. JSON-quoted
+// like the other free-text values, so an ID can't add a line either.
 function callerPreview(agentId: string | undefined, fromNumberId: string | undefined): string {
   const parts = [
-    agentId ? `using agent ${agentId}` : null,
-    fromNumberId ? `from number ${fromNumberId}` : null,
+    agentId ? `using agent ${JSON.stringify(agentId)}` : null,
+    fromNumberId ? `from number ${JSON.stringify(fromNumberId)}` : null,
   ].filter((p): p is string => p !== null);
   return parts.length ? ` ${parts.join(" ")}` : "";
 }
