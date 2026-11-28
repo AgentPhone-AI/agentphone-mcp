@@ -68,25 +68,31 @@ test("expires after the TTL and resolves again", async () => {
   assert.equal(state.calls.length, 2);
 });
 
-test("a rejected credential (401) is anonymous for the full TTL", async () => {
+test("a rejected credential (401) is anonymous, and only for the short TTL", async () => {
+  let valid = false;
   const { identify, state } = rig({
-    credential: () => "sk_live_bad",
+    credential: () => "sk_live_rotated",
     lookup: async () => {
-      const err = new Error("unauthorized");
-      err.status = 401;
-      throw err;
+      if (!valid) {
+        const err = new Error("unauthorized");
+        err.status = 401;
+        throw err;
+      }
+      return "acct-1";
     },
   });
-  assert.equal(await identify(), undefined);
-  state.now += IDENTITY_FAIL_TTL_MS + 1; // past the short window…
-  assert.equal(await identify(), undefined);
-  assert.equal(state.calls.length, 1); // …but still cached: 401 holds for the full TTL
-  state.now += IDENTITY_TTL_MS;
-  assert.equal(await identify(), undefined);
+  assert.equal(await identify(), undefined); // rejected resolves, never throws
+  assert.equal(await identify(), undefined); // cached: no hammering
+  assert.equal(state.calls.length, 1);
+  // One stray 401 against a just-rotated token must not strand it: once the
+  // backend accepts the same bytes, the short TTL lets them resolve.
+  valid = true;
+  state.now += IDENTITY_FAIL_TTL_MS + 1;
+  assert.deepEqual(await identify(), { user: "acct-1" });
   assert.equal(state.calls.length, 2);
 });
 
-test("a transient failure is anonymous only for the short TTL", async () => {
+test("a transient failure rethrows (cached too), then recovers after the short TTL", async () => {
   let fail = true;
   const { identify, state } = rig({
     credential: () => "sk_live_a",
@@ -95,13 +101,50 @@ test("a transient failure is anonymous only for the short TTL", async () => {
       return "acct-1";
     },
   });
-  assert.equal(await identify(), undefined);
-  assert.equal(await identify(), undefined); // cached failure: no hammering
+  // Throwing (not anonymous) keeps Wakeshift on its retryable path: a stream
+  // isn't revoked and no session-bound voucher is silently handed out.
+  await assert.rejects(identify, /backend unreachable/);
+  await assert.rejects(identify, /backend unreachable/); // cached failure rethrows
   assert.equal(state.calls.length, 1);
   fail = false;
   state.now += IDENTITY_FAIL_TTL_MS + 1;
   assert.deepEqual(await identify(), { user: "acct-1" });
   assert.equal(state.calls.length, 2);
+});
+
+test("concurrent calls share a failing lookup's rejection", async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const { identify, state } = rig({
+    credential: () => "sk_live_a",
+    lookup: () => gate.then(() => Promise.reject(new Error("boom"))),
+  });
+  const [a, b] = [identify(), identify()];
+  release();
+  await assert.rejects(() => a, /boom/);
+  await assert.rejects(() => b, /boom/);
+  assert.equal(state.calls.length, 1);
+});
+
+test("a synchronously throwing lookup cannot poison the in-flight map", async () => {
+  let fail = true;
+  const state = { now: 1_000_000, calls: 0 };
+  const identify = makeIdentify({
+    credential: () => "sk_live_a",
+    // Throws synchronously (no async wrapper): cleanup must still run after
+    // the in-flight registration, or every later call returns this failure.
+    lookup: (c) => {
+      state.calls++;
+      if (fail) throw new Error("sync boom");
+      return Promise.resolve("acct-1");
+    },
+    now: () => state.now,
+  });
+  await assert.rejects(identify, /sync boom/);
+  fail = false;
+  state.now += IDENTITY_FAIL_TTL_MS + 1;
+  assert.deepEqual(await identify(), { user: "acct-1" });
+  assert.equal(state.calls, 2);
 });
 
 test("different credentials resolve independently", async () => {
