@@ -20,7 +20,8 @@ import { createRequire } from "node:module";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { installConciseValidation } from "./validation.js";
 import { z } from "zod";
-import { AgentPhoneAPI } from "./api.js";
+import { AgentPhoneAPI, withSubAccount } from "./api.js";
+import { makeIdentify } from "./identity.js";
 import { registerTools, type ToolRegistrar } from "./tools.js";
 import { OUTPUT_SCHEMAS } from "./output-schemas.js";
 import {
@@ -673,12 +674,43 @@ async function startHttp(): Promise<void> {
   registerTools(registrar, api, { watchMessages: wakeshiftOn, registerWatch: watchRegistrar });
 
   if (wakeshiftOn) {
+    // The request's credential, resolved exactly as the tool-call boundary
+    // resolves it (OAuth: the validated access token; otherwise the Bearer
+    // header, or the opted-in anonymous fallback). "" means none.
+    const credentialFor = (): string => {
+      if (oauthEnabled) {
+        try {
+          const c: any = getRequestContext();
+          return c?.auth?.accessToken || "";
+        } catch {
+          return "";
+        }
+      }
+      const header = authorizationHeader();
+      if (header === null) return "";
+      const bearer = header?.match(/^Bearer +([^\s]+)$/i)?.[1] || "";
+      return bearer || (allowAnonymous && header === undefined ? serverApiKey : "");
+    };
+    // Who is calling, by AgentPhone account: binds subscribe vouchers (and
+    // native subscriptions) to the account instead of the Mcp-Session-Id, so
+    // ChatGPT can redeem a voucher from a later session (see identity.ts).
+    // Resolved outside the sub-account scope: identity is the credential's
+    // own account whatever sub-account a call acts on.
+    const identify = makeIdentify({
+      credential: credentialFor,
+      lookup: async (credential) => {
+        const { account_id } = await withSubAccount(undefined, () =>
+          tokenStore.run(credential, () => api.me())
+        );
+        return account_id;
+      },
+    });
     // mcp-use builds an MCP SDK McpServer for each session (and each stateless
     // request); attach to each one it hands out.
     const sessionServer = server.getServerForSession.bind(server);
     server.getServerForSession = (sessionId?: string) => {
       const mcp = sessionServer(sessionId);
-      wake.attach(mcp as any, { wrap: WAKESHIFT_WRAP });
+      wake.attach(mcp as any, { wrap: WAKESHIFT_WRAP, identify });
       return mcp;
     };
     // Protocol 2026-07-28 has no session. mcp-use answers a request without one

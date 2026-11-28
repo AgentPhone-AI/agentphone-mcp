@@ -961,6 +961,18 @@ export class AgentPhoneAPI {
     }>("GET", `/v1/sub-accounts?limit=${limit}&offset=${offset}`);
   }
 
+  // --- Identity ---
+
+  /**
+   * Which account the presented credential belongs to (GET /v1/me). Always the
+   * credential's own account: the sub-account scope must not change the answer,
+   * so callers resolve identity outside withSubAccount. Short timeout: identity
+   * resolution runs inside Wakeshift's own 10-second identify budget.
+   */
+  async me() {
+    return this.request<{ account_id: string }>("GET", "/v1/me", undefined, 8_000);
+  }
+
   // --- Usage ---
 
   async getUsage() {
