@@ -245,7 +245,9 @@ function buildCallControls(args: {
 // approves the call from the preview, so anything that changes what the callee
 // hears or is told (the voice, the identity and purpose given to call
 // screening, the variables the agent speaks from) or whether the call is
-// recorded has to be in it. Unset controls add nothing.
+// recorded has to be in it. Unset controls add nothing. Free-text values are
+// JSON-quoted, so a newline or quote inside one can't end its line early and
+// make the preview show a line the request doesn't carry.
 function callControlsPreview(args: {
   voice?: string;
   disable_recording?: boolean;
@@ -256,12 +258,12 @@ function callControlsPreview(args: {
 }): string {
   const lines = [
     args.call_screening_identity !== undefined
-      ? `Identity given to call screening: "${args.call_screening_identity}"`
+      ? `Identity given to call screening: ${JSON.stringify(args.call_screening_identity)}`
       : null,
     args.call_screening_purpose !== undefined
-      ? `Purpose given to call screening: "${args.call_screening_purpose}"`
+      ? `Purpose given to call screening: ${JSON.stringify(args.call_screening_purpose)}`
       : null,
-    args.voice !== undefined ? `Voice: ${args.voice} (instead of the agent's default)` : null,
+    args.voice !== undefined ? `Voice: ${JSON.stringify(args.voice)} (instead of the agent's default)` : null,
     args.variables !== undefined && Object.keys(args.variables).length > 0
       ? `Variables: ${JSON.stringify(args.variables)}`
       : null,
@@ -1498,7 +1500,7 @@ export function registerTools(
           `This will place an outbound call to ${to_number}${callerPreview(agent_id, from_number_id)}. ` +
             (wait_for_speaker || initial_greeting === ""
               ? "The call waits silently for the person to speak first."
-              : initial_greeting ? `The call opens with: "${initial_greeting}"` : "Your webhook drives what the agent says.") +
+              : initial_greeting ? `The call opens with: ${JSON.stringify(initial_greeting)}` : "Your webhook drives what the agent says.") +
             callControlsPreview({ voice, ...controls })
         );
       }
@@ -1574,11 +1576,11 @@ export function registerTools(
       if (!confirm) {
         return confirmationPreview(
           `This will place an autonomous AI phone call to ${to_number}${callerPreview(agent_id, from_number_id)}, ` +
-            `where the assistant will hold a conversation about: "${topic}".` +
+            `where the assistant will hold a conversation about: ${JSON.stringify(topic)}.` +
             (wait_for_speaker || initial_greeting === ""
               ? " The call waits silently for the person to speak first."
               : initial_greeting
-                ? ` The call opens with: "${initial_greeting}"`
+                ? ` The call opens with: ${JSON.stringify(initial_greeting)}`
                 : " The assistant opens the call on its own.") +
             callControlsPreview({ voice, ...controls })
         );

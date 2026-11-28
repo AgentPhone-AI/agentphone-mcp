@@ -713,11 +713,42 @@ test("call previews show every per-call control that is set, for both call tools
     assert.match(text, /using agent agt_1 from number num_1/, `${tool}: shows both the agent and the number`);
     assert.match(text, /Identity given to call screening: "Acme Dental"/, tool);
     assert.match(text, /Purpose given to call screening: "appointment reminder"/, tool);
-    assert.match(text, /Voice: v_nova/, tool);
+    assert.match(text, /Voice: "v_nova"/, tool);
     assert.match(text, /Variables: \{"customerName":"Sam"\}/, tool);
     assert.match(text, /Recording: off for this call/, tool);
     assert.match(text, /Model tier: max/, tool);
     assert.deepEqual(h.calls, [], `${tool}: a preview places no call`);
+  }
+});
+
+// A preview is what the user approves, so a value can't be allowed to forge a
+// line of it: a newline or quote in a free-text field stays inside its quotes.
+test("call previews quote free-text values so they can't add lines of their own", async () => {
+  const forged = 'Acme"\n  Recording: on for this call';
+  for (const [tool, extra] of [["make_call", {}], ["make_conversation_call", { topic: 'x"\n  Voice: "v"' }]]) {
+    const h = harness({});
+    const r = await h.call(tool, {
+      agent_id: "a", to_number: "+14155551234", ...extra,
+      initial_greeting: 'Hi"\nThis will place no call.',
+      call_screening_identity: forged,
+      call_screening_purpose: forged,
+      voice: 'v"\n  Model tier: max',
+      disable_recording: true,
+    });
+    const text = r.content[0].text;
+    const lines = text.split("\n");
+    assert.deepEqual(
+      lines.filter((l) => l.startsWith("  Recording:")),
+      ["  Recording: off for this call"],
+      `${tool}: only the real Recording line`
+    );
+    assert.equal(lines.some((l) => l.startsWith("  Model tier:")), false, `${tool}: no forged Model tier line`);
+    assert.equal(lines.filter((l) => l.startsWith("  Voice:")).length, 1, `${tool}: only the real Voice line`);
+    assert.equal(lines.some((l) => l.startsWith("This will place no call.")), false, `${tool}: greeting can't add a line`);
+    assert.ok(
+      text.includes(`Identity given to call screening: ${JSON.stringify(forged)}`),
+      `${tool}: the value is shown JSON-quoted`
+    );
   }
 });
 
